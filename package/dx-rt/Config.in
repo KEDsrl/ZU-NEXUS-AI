@@ -1,0 +1,12 @@
+config BR2_PACKAGE_DX_RT
+	bool "dx-rt"
+	depends on BR2_INSTALL_LIBSTDCPP
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	select BR2_PACKAGE_NCURSES
+	help
+	  DeepX Runtime SDK (libdxrt, dxrtd, dxrt-cli, run_model, dxtop)
+	  per NPU DX-M1. Sorgente: DEEPX-AI/dx_rt v3.3.2. Build senza
+	  ONNXRuntime e senza binding Python (vedi .mk per riabilitarli).
+
+comment "dx-rt needs a toolchain w/ C++, threads"
+	depends on !BR2_INSTALL_LIBSTDCPP || !BR2_TOOLCHAIN_HAS_THREADS

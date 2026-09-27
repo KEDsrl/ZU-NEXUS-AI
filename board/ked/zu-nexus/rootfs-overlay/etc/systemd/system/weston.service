@@ -1,0 +1,18 @@
+[Unit]
+Description=Weston compositor (utente ked)
+After=seatd.service video-pipeline.service dev-dri-card1.device
+Requires=seatd.service
+
+[Service]
+User=ked
+Group=ked
+SupplementaryGroups=video render input
+RuntimeDirectory=user/1001
+Environment=XDG_RUNTIME_DIR=/run/user/1001
+# sul kernel xlnx 2023.2 lima e' card0 (solo render) e il DP e' card1:
+# senza --drm-device Weston puo' aprire card0 e fallire con "no outputs"
+ExecStart=/usr/bin/weston --config=/etc/xdg/weston/weston.ini --drm-device=card1
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

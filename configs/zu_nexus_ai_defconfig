@@ -1,0 +1,144 @@
+# =============================================================================
+# KED ZU-NEXUS-AI - ZynqMP xczu1eg + IMX219 + DeepX DX-M1
+# Buildroot >= 2024.02 (consigliato 2025.02 LTS: Weston 13+, GStreamer 1.24)
+#
+#   make BR2_EXTERNAL=/path/ked-external zu_nexus_ai_defconfig
+#   make
+# =============================================================================
+
+# --- architettura ---
+BR2_aarch64=y
+BR2_cortex_a53=y
+
+# --- toolchain (glibc + C++ per Qt6/dx_rt) ---
+BR2_TOOLCHAIN_BUILDROOT_GLIBC=y
+BR2_TOOLCHAIN_BUILDROOT_CXX=y
+
+# --- patch locali (weston/gstreamer1/linux) ---
+BR2_GLOBAL_PATCH_DIR="$(BR2_EXTERNAL_KED_PATH)/board/ked/zu-nexus/patches"
+
+# --- sistema ---
+BR2_TARGET_GENERIC_HOSTNAME="zu-nexus-ai"
+BR2_TARGET_GENERIC_ISSUE="KED ZU-NEXUS-AI"
+BR2_INIT_SYSTEMD=y
+BR2_TARGET_GENERIC_ROOT_PASSWD="root"
+# rete: DHCP via overlay networkd (20-wired.network, match end*/eth*)
+BR2_ROOTFS_USERS_TABLES="$(BR2_EXTERNAL_KED_PATH)/board/ked/zu-nexus/users.txt"
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_KED_PATH)/board/ked/zu-nexus/rootfs-overlay"
+BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_KED_PATH)/board/ked/zu-nexus/post-build.sh"
+BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_KED_PATH)/board/ked/zu-nexus/post-image.sh"
+
+# --- kernel: linux-xlnx 2023.2 (6.1 LTS Xilinx) ---
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_CUSTOM_GIT=y
+BR2_LINUX_KERNEL_CUSTOM_REPO_URL="https://github.com/Xilinx/linux-xlnx.git"
+BR2_LINUX_KERNEL_CUSTOM_REPO_VERSION="xilinx-v2023.2"
+BR2_LINUX_KERNEL_DEFCONFIG="xilinx"
+BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_KED_PATH)/board/ked/zu-nexus/linux.fragment $(BR2_EXTERNAL_KED_PATH)/board/ked/zu-nexus/linux-rt.fragment"
+BR2_LINUX_KERNEL_DTS_SUPPORT=y
+BR2_LINUX_KERNEL_INTREE_DTS_NAME="xilinx/zynqmp-ked-zcu-revA"
+BR2_LINUX_KERNEL_NEEDS_HOST_OPENSSL=y
+# header toolchain = kernel custom (6.1): senza la serie esplicita Buildroot
+# assume 2.6, glibc diventa non selezionabile e la libc ricade su uclibc
+BR2_KERNEL_HEADERS_AS_KERNEL=y
+BR2_PACKAGE_HOST_LINUX_HEADERS_CUSTOM_6_1=y
+
+# --- ARM Trusted Firmware (bl31 per bootgen) ---
+BR2_TARGET_ARM_TRUSTED_FIRMWARE=y
+BR2_TARGET_ARM_TRUSTED_FIRMWARE_PLATFORM="zynqmp"
+BR2_TARGET_ARM_TRUSTED_FIRMWARE_BL31=y
+BR2_TARGET_ARM_TRUSTED_FIRMWARE_ADDITIONAL_VARIABLES="ZYNQMP_CONSOLE=cadence RESET_TO_BL31=1"
+# bootgen vuole l'ELF (porta load/entry): oltre al .bin di default
+BR2_TARGET_ARM_TRUSTED_FIRMWARE_IMAGES="bl31/bl31.elf"
+
+# --- U-Boot: u-boot-xlnx 2023.2 ---
+BR2_TARGET_UBOOT=y
+BR2_TARGET_UBOOT_BUILD_SYSTEM_KCONFIG=y
+BR2_TARGET_UBOOT_CUSTOM_GIT=y
+BR2_TARGET_UBOOT_CUSTOM_REPO_URL="https://github.com/Xilinx/u-boot-xlnx.git"
+BR2_TARGET_UBOOT_CUSTOM_REPO_VERSION="xilinx-v2023.2"
+BR2_TARGET_UBOOT_BOARD_DEFCONFIG="xilinx_zynqmp_virt"
+BR2_TARGET_UBOOT_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_KED_PATH)/board/ked/zu-nexus/uboot.fragment"
+BR2_TARGET_UBOOT_CUSTOM_MAKEOPTS="DEVICE_TREE=zynqmp-ked-zcu-revA"
+BR2_TARGET_UBOOT_NEEDS_DTC=y
+BR2_TARGET_UBOOT_NEEDS_OPENSSL=y
+BR2_TARGET_UBOOT_FORMAT_ELF=y
+# u-boot.bin (dtb appeso): permette il BOOT.BIN senza partizione dtb separata
+BR2_TARGET_UBOOT_FORMAT_BIN=y
+
+# --- grafica: Mesa/lima + Weston ---
+BR2_PACKAGE_MESA3D=y
+BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_LIMA=y
+BR2_PACKAGE_MESA3D_OPENGL_EGL=y
+BR2_PACKAGE_MESA3D_OPENGL_ES=y
+BR2_PACKAGE_WESTON=y
+BR2_PACKAGE_WESTON_DRM=y
+BR2_PACKAGE_SEATD=y
+BR2_PACKAGE_SEATD_DAEMON=y
+BR2_PACKAGE_WAYLAND_UTILS=y
+BR2_PACKAGE_LIBDRM_INSTALL_TESTS=y
+
+# --- GStreamer ---
+BR2_PACKAGE_GSTREAMER1=y
+BR2_PACKAGE_GST1_PLUGINS_BASE=y
+BR2_PACKAGE_GST1_PLUGINS_BASE_PLUGIN_APP=y
+BR2_PACKAGE_GST1_PLUGINS_BASE_PLUGIN_VIDEOCONVERTSCALE=y
+BR2_PACKAGE_GST1_PLUGINS_BASE_PLUGIN_VIDEOTESTSRC=y
+BR2_PACKAGE_GST1_PLUGINS_GOOD=y
+BR2_PACKAGE_GST1_PLUGINS_GOOD_PLUGIN_V4L2=y
+BR2_PACKAGE_GST1_PLUGINS_BAD=y
+BR2_PACKAGE_GST1_PLUGINS_BAD_PLUGIN_KMS=y
+BR2_PACKAGE_GST1_PLUGINS_BAD_PLUGIN_WAYLANDSINK=y
+BR2_PACKAGE_GST1_PLUGINS_BAD_PLUGIN_DEBUGUTILS=y
+BR2_PACKAGE_GST1_PLUGINS_BAD_PLUGIN_Y4M=y
+
+# --- Qt6 (Wayland + QML) ---
+BR2_PACKAGE_QT6=y
+BR2_PACKAGE_QT6BASE_GUI=y
+BR2_PACKAGE_QT6BASE_WIDGETS=y
+BR2_PACKAGE_QT6BASE_NETWORK=y
+BR2_PACKAGE_QT6BASE_FONTCONFIG=y
+BR2_PACKAGE_QT6BASE_HARFBUZZ=y
+BR2_PACKAGE_QT6BASE_PNG=y
+BR2_PACKAGE_QT6DECLARATIVE=y
+BR2_PACKAGE_QT6DECLARATIVE_QUICK=y
+BR2_PACKAGE_QT6WAYLAND=y
+BR2_PACKAGE_QT6WAYLAND_COMPOSITOR=y
+BR2_PACKAGE_DEJAVU=y
+
+# --- utility video/sistema ---
+BR2_PACKAGE_LIBV4L=y
+BR2_PACKAGE_LIBV4L_UTILS=y
+BR2_PACKAGE_PCIUTILS=y
+BR2_PACKAGE_OPENSSH=y
+BR2_PACKAGE_HTOP=y
+
+# --- DeepX DX-M1/DX-M1M ---
+BR2_PACKAGE_DX_NPU_DRIVER=y
+BR2_PACKAGE_DX_RT=y
+BR2_PACKAGE_DX_FW=y
+BR2_PACKAGE_DX_STREAM=y
+# dipendenze dx-stream (esplicite: opencv4 con i moduli minimi)
+BR2_PACKAGE_OPENCV4=y
+BR2_PACKAGE_OPENCV4_LIB_IMGPROC=y
+BR2_PACKAGE_OPENCV4_LIB_IMGCODECS=y
+BR2_PACKAGE_EIGEN=y
+BR2_PACKAGE_JSON_GLIB=y
+# libyuv: usata la versione recente fornita dall external (ked-libyuv),
+# quella in-tree non ha NV12Scale
+BR2_PACKAGE_KED_LIBYUV=y
+BR2_PACKAGE_MOSQUITTO=y
+# librdkafka: pacchetto fornito da questo external (assente in Buildroot)
+BR2_PACKAGE_LIBRDKAFKA=y
+BR2_PACKAGE_DXPOSE_QT=y
+
+# --- filesystem/immagini ---
+BR2_TARGET_ROOTFS_EXT2=y
+BR2_TARGET_ROOTFS_EXT2_4=y
+BR2_TARGET_ROOTFS_EXT2_SIZE="1024M"
+BR2_PACKAGE_HOST_GENIMAGE=y
+BR2_PACKAGE_HOST_DOSFSTOOLS=y
+BR2_PACKAGE_HOST_MTOOLS=y
+# fuso orario per l'orologio dell'app (l'ora arriva via NTP da systemd-timesyncd)
+BR2_TARGET_TZ_INFO=y
+BR2_TARGET_LOCALTIME="Europe/Rome"

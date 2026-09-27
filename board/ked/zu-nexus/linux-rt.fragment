@@ -1,0 +1,8 @@
+# ============ PREEMPT_RT ============
+# ATTENZIONE: efficace solo con la patch RT presente in patches/linux/
+# (scaricabile con: ./build.sh rt-patch [versione]). Senza patch, i simboli
+# sotto non esistono e vengono ignorati con un warning di merge_config.
+CONFIG_EXPERT=y
+CONFIG_PREEMPT_RT=y
+CONFIG_HIGH_RES_TIMERS=y
+CONFIG_RT_GROUP_SCHED=n

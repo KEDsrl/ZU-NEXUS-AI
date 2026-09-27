@@ -1,0 +1,17 @@
+[Unit]
+Description=IMX219 video pipeline init (modo display)
+Before=weston.service
+After=systemd-udevd.service
+
+[Service]
+Type=oneshot
+# L'attesa del device e' fatta qui, con polling: robusto a prescindere dal
+# fatto che udev tagghi o meno /dev/media* come .device systemd. Al primo
+# boot il probe I2C del sensore imx219 puo' finire dopo l'avvio del service;
+# senza questo retry setup_pipeline muore al primo media-ctl -V.
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do for m in /dev/media*; do [ -e "$m" ] && media-ctl -d "$m" -p 2>/dev/null | grep -q vcap-imx219 && exit 0; done; sleep 0.5; done; echo "vcap-imx219 non comparso entro 15s" >&2; exit 1'
+ExecStart=/usr/bin/setup_pipeline.sh display
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

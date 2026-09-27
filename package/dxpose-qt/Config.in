@@ -1,0 +1,32 @@
+config BR2_PACKAGE_DXPOSE_QT
+	bool "dxpose-qt"
+	depends on BR2_PACKAGE_QT6
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	depends on BR2_INSTALL_LIBSTDCPP
+	select BR2_PACKAGE_QT6BASE
+	select BR2_PACKAGE_QT6BASE_WIDGETS
+	select BR2_PACKAGE_QT6BASE_GUI
+	select BR2_PACKAGE_QT6BASE_NETWORK
+	select BR2_PACKAGE_GSTREAMER1
+	select BR2_PACKAGE_GST1_PLUGINS_BASE
+	select BR2_PACKAGE_GST1_PLUGINS_BASE_PLUGIN_APP
+	select BR2_PACKAGE_GST1_PLUGINS_BASE_PLUGIN_VIDEOCONVERTSCALE
+	select BR2_PACKAGE_GST1_PLUGINS_GOOD
+	select BR2_PACKAGE_GST1_PLUGINS_GOOD_PLUGIN_V4L2
+	select BR2_PACKAGE_GST1_PLUGINS_BAD
+	# y4mdec (gst-plugins-bad, plugin y4m): decodifica del video di fallback
+	select BR2_PACKAGE_GST1_PLUGINS_BAD_PLUGIN_Y4M
+	help
+	  Visualizzatore Qt6/GStreamer per la catena video IMX219 in PL
+	  con inferenza sull'acceleratore DeepX DX-M1.
+
+	  - configura nativamente la pipeline media (demosaic/CSC/gamma/VPSS)
+	  - selezione manuale del modello .dxnn, fallback su file video
+	  - controlli ISP live + auto white balance gray-world
+	  - telemetria INA226 e DX-M1
+
+	  Richiede a runtime dx-stream (elementi dxpreprocess/dxinfer/...)
+	  e i modelli .dxnn in /home/ked/models.
+
+comment "dxpose-qt needs Qt6 and a toolchain w/ threads, C++"
+	depends on !BR2_PACKAGE_QT6 || !BR2_TOOLCHAIN_HAS_THREADS || !BR2_INSTALL_LIBSTDCPP

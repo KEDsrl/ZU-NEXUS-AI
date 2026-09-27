@@ -1,0 +1,7 @@
+# Rete cablata (GEM): DHCP di default. Gestita da set_eth.sh: non
+# modificare a mano se si usa lo script (la sovrascrive).
+[Match]
+Name=end* eth*
+
+[Network]
+DHCP=yes

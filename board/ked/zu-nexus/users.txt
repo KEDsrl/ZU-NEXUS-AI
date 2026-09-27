@@ -1,0 +1,1 @@
+ked 1001 ked 1001 =ked /home/ked /bin/sh video,render,input,dialout ked user (weston/qt session)

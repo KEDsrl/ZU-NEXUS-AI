@@ -1,0 +1,77 @@
+From 029414c0aed9a3d0889366a9700b9d5dd1e35441 Mon Sep 17 00:00:00 2001
+From: KED <dev@ked.local>
+Date: Sun, 12 Jul 2026 14:59:56 +0000
+Subject: [PATCH] media: xilinx-vpss-csc: apply color controls while streaming
+
+I coefficienti CSC vengono programmati solo in s_stream(): i controlli
+(WB gain, brightness, contrast) modificati a streaming attivo restano
+inerti fino al riavvio dello stream, a differenza di gamma e sensore.
+Traccia lo stato di streaming e applica i coefficienti immediatamente
+in s_ctrl, permettendo la taratura live.
+---
+ .../media/platform/xilinx/xilinx-vpss-csc.c   | 28 +++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+diff --git a/drivers/media/platform/xilinx/xilinx-vpss-csc.c b/drivers/media/platform/xilinx/xilinx-vpss-csc.c
+index 9eeca08..b429168 100644
+--- a/drivers/media/platform/xilinx/xilinx-vpss-csc.c
++++ b/drivers/media/platform/xilinx/xilinx-vpss-csc.c
+@@ -188,6 +188,7 @@ struct xcsc_dev {
+ 	s32 blue_gain_active;
+ 	s32 k_hw[XV_CSC_K_MAX_ROWS][XV_CSC_K_MAX_COLUMNS + 1];
+ 	s32 shadow_coeff[XV_CSC_K_MAX_ROWS][XV_CSC_K_MAX_COLUMNS + 1];
++	bool streaming;
+ 	s32 clip_max;
+ 	struct gpio_desc *rst_gpio;
+ 	u32 max_width;
+@@ -739,6 +740,7 @@ static int xcsc_s_stream(struct v4l2_subdev *subdev, int enable)
+ 	dev_dbg(xcsc->xvip.dev, "%s : Stream %s", __func__,
+ 		enable ? "On" : "Off");
+ 	if (!enable) {
++		xcsc->streaming = false;
+ 		/* Reset the Global IP Reset through PS GPIO */
+ 		gpiod_set_value_cansleep(xcsc->rst_gpio, XCSC_RESET_ASSERT);
+ 		gpiod_set_value_cansleep(xcsc->rst_gpio, XCSC_RESET_DEASSERT);
+@@ -780,6 +782,7 @@ static int xcsc_s_stream(struct v4l2_subdev *subdev, int enable)
+ #endif
+ 	/* Start VPSS CSC IP */
+ 	xcsc_write(xcsc, XV_CSC_AP_CTRL, XCSC_STREAM_ON);
++	xcsc->streaming = true;
+ 	return 0;
+ }
+ 
+@@ -888,6 +891,31 @@ static int xcsc_s_ctrl(struct v4l2_ctrl *ctrl)
+ 		xcsc->green_gain =  (2 * ctrl->val) + 20;
+ 		break;
+ 	}
++
++	/*
++	 * Di serie i coefficienti vengono scritti nell'IP solo in s_stream():
++	 * i controlli cambiati a streaming attivo non hanno effetto fino al
++	 * riavvio dello stream. Applichiamo subito se l'IP sta streammando.
++	 */
++	if (xcsc->streaming) {
++		switch (ctrl->id) {
++		case V4L2_CID_XILINX_CSC_BRIGHTNESS:
++			xcsc_set_brightness(xcsc);
++			break;
++		case V4L2_CID_XILINX_CSC_CONTRAST:
++			xcsc_set_contrast(xcsc);
++			break;
++		case V4L2_CID_XILINX_CSC_RED_GAIN:
++			xcsc_set_red_gain(xcsc);
++			break;
++		case V4L2_CID_XILINX_CSC_BLUE_GAIN:
++			xcsc_set_blue_gain(xcsc);
++			break;
++		case V4L2_CID_XILINX_CSC_GREEN_GAIN:
++			xcsc_set_green_gain(xcsc);
++			break;
++		}
++	}
+ 	return 0;
+ }
+ 
+-- 
+2.43.0
+

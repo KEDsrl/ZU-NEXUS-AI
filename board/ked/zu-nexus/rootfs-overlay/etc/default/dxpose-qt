@@ -1,0 +1,10 @@
+# Opzioni aggiuntive per dxpose-qt (lette da dxpose-qt.service).
+# Dopo una modifica:  systemctl restart dxpose-qt
+#
+# --rgb   cattura in RGB3: il frame buffer scrive gia' R,G,B e sparisce
+#         l'ultima conversione software (scambio R<->B).
+#         SOLO con un bitstream che ha CONFIG.HAS_RGB8 nel v_frmbuf_wr: il
+#         driver non lo verifica, e senza HAS_RGB8 l'immagine e' corrotta.
+#
+# Altri esempi: --width=1024 --height=576   --no-awb   --fw-update-args=-u
+DXPOSE_ARGS=""

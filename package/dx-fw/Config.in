@@ -1,0 +1,9 @@
+config BR2_PACKAGE_DX_FW
+	bool "dx-fw"
+	help
+	  Firmware DeepX per NPU DX-M1/DX-M1M (v2.5.6). Installa i fw.bin
+	  di tutte le varianti in /lib/firmware/deepx/. L'aggiornamento del
+	  modulo si esegue una tantum (poi power cycle) con:
+	    dxrt-cli -g /lib/firmware/deepx/m1/2.5.6/mdot2/fw.bin  (legge la versione)
+	    dxrt-cli -u /lib/firmware/deepx/m1/2.5.6/mdot2/fw.bin  (aggiorna)
+	  dx_rt 3.3.2 richiede firmware >= 2.5.2.

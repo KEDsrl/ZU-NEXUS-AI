@@ -1,0 +1,9 @@
+config BR2_PACKAGE_KED_LIBYUV
+	bool "ked-libyuv"
+	depends on BR2_INSTALL_LIBSTDCPP
+	select BR2_PACKAGE_JPEG
+	help
+	  libyuv recente (snapshot upstream) al posto del pacchetto
+	  Buildroot in-tree, la cui versione non include NV12Scale
+	  richiesta da dx-stream. Non abilitare insieme a
+	  BR2_PACKAGE_LIBYUV.

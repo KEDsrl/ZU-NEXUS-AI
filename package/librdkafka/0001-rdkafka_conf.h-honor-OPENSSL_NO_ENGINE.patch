@@ -1,0 +1,50 @@
+From: KED BSP <bsp@ked.local>
+Date: Sun, 12 Jul 2026 17:00:00 +0000
+Subject: [PATCH] rdkafka_conf.h: honor OPENSSL_NO_ENGINE
+
+Buildroot builds OpenSSL 3 with `no-engine` unless
+BR2_PACKAGE_LIBOPENSSL_ENGINES is set, so libcrypto.so.3 does not
+export the (deprecated) ENGINE_* symbols. librdkafka enables its
+ENGINE support based on the OpenSSL version alone, which produces a
+librdkafka.so.1 with a dangling reference to ENGINE_init: any
+consumer linked against it (e.g. GStreamer's libgstdxstream.so)
+then fails to load with:
+
+  librdkafka.so.1: undefined symbol: ENGINE_init
+
+Gate WITH_SSL_ENGINE on !defined(OPENSSL_NO_ENGINE) as well, and fix
+the ssl.engine struct member to use the same WITH_SSL_ENGINE guard
+(it used the raw version check, which would not compile once ENGINE
+support is disabled). Also include <openssl/opensslconf.h> explicitly
+so OPENSSL_NO_ENGINE is visible where the guard is evaluated.
+
+Upstream status: not submitted
+---
+ src/rdkafka_conf.h | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+--- a/src/rdkafka_conf.h
++++ b/src/rdkafka_conf.h
+@@ -33,8 +33,12 @@
+ #include "rdlist.h"
+ #include "rdkafka_cert.h"
+ 
++#if WITH_SSL
++#include <openssl/opensslconf.h>
++#endif
++
+ #if WITH_SSL && OPENSSL_VERSION_NUMBER >= 0x10100000 &&                        \
+-    !defined(OPENSSL_IS_BORINGSSL)
++    !defined(OPENSSL_IS_BORINGSSL) && !defined(OPENSSL_NO_ENGINE)
+ #define WITH_SSL_ENGINE 1
+ /* Deprecated in OpenSSL 3 */
+ #include <openssl/engine.h>
+@@ -257,7 +261,7 @@
+                 /** CSV list of Windows certificate stores */
+                 char *ca_cert_stores;
+                 char *crl_location;
+-#if WITH_SSL && OPENSSL_VERSION_NUMBER >= 0x10100000
++#if WITH_SSL_ENGINE
+                 ENGINE *engine;
+ #endif
+                 char *engine_location;

@@ -1,0 +1,7 @@
+source "$BR2_EXTERNAL_KED_PATH/package/dx-npu-driver/Config.in"
+source "$BR2_EXTERNAL_KED_PATH/package/dx-rt/Config.in"
+source "$BR2_EXTERNAL_KED_PATH/package/dx-fw/Config.in"
+source "$BR2_EXTERNAL_KED_PATH/package/dx-stream/Config.in"
+source "$BR2_EXTERNAL_KED_PATH/package/librdkafka/Config.in"
+source "$BR2_EXTERNAL_KED_PATH/package/ked-libyuv/Config.in"
+source "$BR2_EXTERNAL_KED_PATH/package/dxpose-qt/Config.in"

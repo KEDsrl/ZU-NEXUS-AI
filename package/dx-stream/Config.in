@@ -1,0 +1,21 @@
+config BR2_PACKAGE_DX_STREAM
+	bool "dx-stream"
+	depends on BR2_PACKAGE_DX_RT
+	depends on BR2_INSTALL_LIBSTDCPP
+	select BR2_PACKAGE_GSTREAMER1
+	select BR2_PACKAGE_GST1_PLUGINS_BASE
+	select BR2_PACKAGE_EIGEN
+	select BR2_PACKAGE_JSON_GLIB
+	select BR2_PACKAGE_ZLIB
+	select BR2_PACKAGE_OPENCV4
+	select BR2_PACKAGE_KED_LIBYUV
+	select BR2_PACKAGE_MOSQUITTO
+	select BR2_PACKAGE_LIBRDKAFKA
+	help
+	  DeepX DX-Stream (v3.0.1): suite di plugin GStreamer per pipeline
+	  di inferenza su DX-M1 (dxinfer, dxconvert, dxosd, dxgather, ...).
+	  In modalita' accelerator richiede anche mosquitto e librdkafka
+	  (broker di messaggi per i metadati).
+
+comment "dx-stream needs dx-rt and a toolchain w/ C++"
+	depends on !BR2_PACKAGE_DX_RT || !BR2_INSTALL_LIBSTDCPP

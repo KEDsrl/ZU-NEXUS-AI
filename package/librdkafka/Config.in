@@ -1,0 +1,13 @@
+config BR2_PACKAGE_LIBRDKAFKA
+	bool "librdkafka"
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	select BR2_PACKAGE_ZLIB
+	select BR2_PACKAGE_OPENSSL
+	help
+	  The Apache Kafka C/C++ client library.
+	  Richiesta da dx-stream (broker metadati) in modalita' accelerator.
+
+	  https://github.com/confluentinc/librdkafka
+
+comment "librdkafka needs a toolchain w/ threads"
+	depends on !BR2_TOOLCHAIN_HAS_THREADS

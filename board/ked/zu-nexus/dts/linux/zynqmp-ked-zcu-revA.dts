@@ -1,0 +1,573 @@
+// SPDX-License-Identifier: GPL-2.0+
+/*
+ * dts file for Xilinx ZynqMP ZCU102 RevA
+ *
+ * (C) Copyright 2015 - 2021, Xilinx, Inc.
+ *
+ * Michal Simek <michal.simek@xilinx.com>
+ */
+
+/dts-v1/;
+
+#include "zynqmp.dtsi"
+#include "zynqmp-clk-ccf.dtsi"
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/pinctrl/pinctrl-zynqmp.h>
+#include <dt-bindings/phy/phy.h>
+#include <dt-bindings/media/xilinx-vip.h>  
+#include "zynqmp-ked-zcu-revA-pl.dtsi"
+
+/ {
+	model = "ZynqMP KED ZCU RevA";
+	compatible = "xlnx,zynqmp-ked-zcu-revA", "xlnx,zynqmp-ked-zcu", "xlnx,zynqmp";
+
+	aliases {
+		ethernet0 = &gem3;
+		serial0 = &uart0;
+		i2c0 = &i2c0;
+		i2c1 = &i2c1;
+		i2c2 = &csi_iic;
+		i2c3 = &ext_iic;
+		mmc0 = &sdhci1;
+		mmc1 = &sdhci0;
+		nvmem0 = &eeprom;
+		rtc0 = &rtc;
+		usb0 = &usb0;
+	};
+
+	chosen {
+		bootargs = "earlycon";
+		stdout-path = "serial0:115200n8";
+	};
+
+	memory {
+		device_type = "memory";
+		reg = <0x0 0x0 0x0 0x80000000>;  
+	};	
+
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+	};
+
+
+	/* 48MHz reference crystal */
+	ref48: ref48M {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <48000000>;
+	};
+
+	/* 25MHz reference crystal */
+	clock_ref25m: ref25M {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <25000000>;
+	};
+	
+	clock_eth25m: out25M {
+		#clock-cells = <0>;
+		compatible = "fixed-clock";
+		clock-frequency = <25000000>;
+	};
+	
+	clock_usb100m: out100MUSB {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <100000000>;
+	};
+
+	clock_video27m: out27M {
+		#clock-cells = <0>;
+		compatible = "fixed-clock";
+		clock-frequency = <27000000>;
+	};
+
+	clock_sata100m: out100M {
+		#clock-cells = <0>;
+		compatible = "fixed-clock";
+		clock-frequency = <100000000>;
+	};
+	
+	clock_pcie100m: out100MPCIe {
+		#clock-cells = <0>;
+		compatible = "fixed-clock";
+		clock-frequency = <100000000>;
+	};
+		
+	usb_phy0: phy0 {
+		#phy-cells = <0>;
+		compatible = "usb-nop-xceiv";
+		reset-gpios = <&gpio 25 GPIO_ACTIVE_LOW>;
+	};
+
+
+	/* dpcon: usato solo dal grafo out_dp, v. nota sopra.
+	 * dpcon {
+	 * compatible = "dp-connector";
+	 * label = "P11";
+	 * type = "full-size";
+	 * 
+	 * port {
+	 * dpcon_in: endpoint {
+	 * remote-endpoint = <&dpsub_dp_out>;
+	 * };
+	 * };
+	 * };
+	 */
+
+};
+
+
+&gpio {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_gpio_default>;
+};
+
+&gem3 {
+	status = "okay";
+	phy-handle = <&phy0>;
+	phy-mode = "rgmii-id";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_gem3_default>;
+	nvmem-cells        = <&mac0>;
+	nvmem-cell-names   = "mac-address";	
+	mdio: mdio {
+		#address-cells = <1>;
+		#size-cells = <0>;	
+		phy0: ethernet-phy@1 {
+			reg = <1>;
+			interrupt-parent  = <&gpio>;                 
+			interrupts        = <7 IRQ_TYPE_LEVEL_LOW>;  
+			reset-gpios       = <&gpio 24 GPIO_ACTIVE_LOW>;
+			reset-assert-us   = <100000>;   /* 100 ms tenuto basso           */
+			reset-deassert-us = <30000>;   /* 30 ms di stabilizzazione     */
+		};
+	};		
+};
+
+&i2c0 {
+	status = "okay";
+	clock-frequency = <400000>;
+	pinctrl-names = "default", "gpio";
+	pinctrl-0 = <&pinctrl_i2c0_default>;
+	pinctrl-1 = <&pinctrl_i2c0_gpio>;
+	scl-gpios = <&gpio 38 GPIO_ACTIVE_HIGH>;
+	sda-gpios = <&gpio 39 GPIO_ACTIVE_HIGH>;
+	
+	/* 24AA02-E48: MAC a offset 0xFA */
+	eeprom:  eeprom@50 {
+		compatible = "atmel,24c02", "atmel,24c02-eeprom";
+		reg        = <0x50>;
+		pagesize   = <16>;
+		#address-cells = <1>;
+		#size-cells    = <1>;
+		mac0: macaddr@fa { 
+			reg = <0xFA 0x06>;
+			label = "mac-address";
+		};
+	};
+	/*
+	 * 5P49V6965 clock generator: configurato da FSBL, non gestito da Linux.
+	 * I clock sono modellati come fixed-clock (clock_usb100m, clock_video27m,
+	 * clock_pcie100m) con le frequenze che FSBL ha già impostato.
+	 */
+};
+
+&i2c1 {
+	status = "okay";
+	clock-frequency = <400000>;
+	pinctrl-names = "default", "gpio";
+	pinctrl-0 = <&pinctrl_i2c1_default>;
+	pinctrl-1 = <&pinctrl_i2c1_gpio>;
+	scl-gpios = <&gpio 40 GPIO_ACTIVE_HIGH>;
+	sda-gpios = <&gpio 41 GPIO_ACTIVE_HIGH>;
+	/* INA231AIYFF - System 5V current/power monitor, Rshunt = 20 mOhm */
+	
+	ina231_5v_sys: power-monitor@40 {
+		compatible = "ti,ina231";
+		reg = <0x40>;
+		shunt-resistor = <20000>; 
+	};
+	
+	/* INA231AIYFF - 3V3 M.2 PCIe connector current/power monitor, Rshunt = 20 mOhm */
+	
+	ina231_3v3_m2_pcie: power-monitor@41 {
+		compatible = "ti,ina231";
+		reg = <0x41>;
+		shunt-resistor = <20000>; 
+	};
+		
+};
+
+&rtc {
+	status = "okay";
+};
+
+/* EMMC */
+&sdhci0 { /* MIO13-23 - 16GB emmc MTFC16GAPALBH-IT */
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_sdhci0_default>;
+	non-removable;
+	disable-wp;
+	bus-width = <8>;
+	xlnx,mio-bank = <0>;
+};
+
+/* SD1 with level shifter */
+&sdhci1 {
+	status = "okay";
+	/*
+	 * 1.0 revision has level shifter and this property should be
+	 * removed for supporting UHS mode
+	 */
+	no-1-8-v;
+	disable-wp;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_sdhci1_default>;
+	xlnx,mio-bank = <1>;
+};
+
+&uart0 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_uart0_default>;
+};
+
+&watchdog0 {
+	status = "okay";
+};
+
+&xilinx_ams {
+	status = "okay";
+};
+
+&pinctrl0 {
+	status = "okay";
+	
+	pinctrl_i2c0_default: i2c0-default {
+		mux {
+			groups = "i2c0_9_grp";
+			function = "i2c0";
+		};
+
+		conf {
+			groups = "i2c0_9_grp";
+			bias-pull-up;
+			slew-rate = <SLEW_RATE_SLOW>;
+			power-source = <IO_STANDARD_LVCMOS18>;
+		};
+	};
+
+	pinctrl_i2c0_gpio: i2c0-gpio {
+		mux {
+			groups = "gpio0_38_grp", "gpio0_39_grp";
+			function = "gpio0";
+		};
+
+		conf {
+			groups = "gpio0_38_grp", "gpio0_39_grp";
+			slew-rate = <SLEW_RATE_SLOW>;
+			power-source = <IO_STANDARD_LVCMOS18>;
+		};
+	};
+
+	pinctrl_i2c1_default: i2c1-default {
+		mux {
+			groups = "i2c1_10_grp";
+			function = "i2c1";
+		};
+
+		conf {
+			groups = "i2c1_10_grp";
+			bias-pull-up;
+			slew-rate = <SLEW_RATE_SLOW>;
+			power-source = <IO_STANDARD_LVCMOS18>;
+		};
+	};
+
+	pinctrl_i2c1_gpio: i2c1-gpio {
+		mux {
+			groups = "gpio0_40_grp", "gpio0_41_grp";
+			function = "gpio0";
+		};
+
+		conf {
+			groups = "gpio0_40_grp", "gpio0_41_grp";
+			slew-rate = <SLEW_RATE_SLOW>;
+			power-source = <IO_STANDARD_LVCMOS18>;
+		};
+	};
+
+	pinctrl_uart0_default: uart0-default {
+		mux {
+			groups = "uart0_2_grp";
+			function = "uart0";
+		};
+
+		conf {
+			groups = "uart0_2_grp";
+			slew-rate = <SLEW_RATE_SLOW>;
+			power-source = <IO_STANDARD_LVCMOS18>;
+		};
+
+		conf-rx {
+			pins = "MIO10";
+			bias-high-impedance;
+		};
+
+		conf-tx {
+			pins = "MIO11";
+			bias-disable;
+		};
+	};
+
+	pinctrl_usb0_default: usb0-default {
+		mux {
+			groups = "usb0_0_grp";
+			function = "usb0";
+		};
+
+		conf {
+			groups = "usb0_0_grp";
+			power-source = <IO_STANDARD_LVCMOS18>;
+		};
+
+		conf-rx {
+			pins = "MIO52", "MIO53", "MIO55";
+			bias-high-impedance;
+			drive-strength = <12>;
+			slew-rate = <SLEW_RATE_FAST>;
+		};
+
+		conf-tx {
+			pins = "MIO54", "MIO56", "MIO57", "MIO58", "MIO59",
+			       "MIO60", "MIO61", "MIO62", "MIO63";
+			bias-disable;
+			drive-strength = <4>;
+			slew-rate = <SLEW_RATE_SLOW>;
+		};
+	};
+
+	pinctrl_gem3_default: gem3-default {
+		mux {
+			function = "ethernet3";
+			groups = "ethernet3_0_grp";
+		};
+
+		conf {
+			groups = "ethernet3_0_grp";
+			slew-rate = <SLEW_RATE_SLOW>;
+			power-source = <IO_STANDARD_LVCMOS18>;
+		};
+
+		conf-rx {
+			pins = "MIO70", "MIO71", "MIO72", "MIO73", "MIO74",
+									"MIO75";
+			bias-high-impedance;
+			low-power-disable;
+		};
+
+		conf-tx {
+			pins = "MIO64", "MIO65", "MIO66", "MIO67", "MIO68",
+									"MIO69";
+			bias-disable;
+			low-power-enable;
+		};
+
+		mux-mdio {
+			function = "mdio3";
+			groups = "mdio3_0_grp";
+		};
+
+		conf-mdio {
+			groups = "mdio3_0_grp";
+			slew-rate = <SLEW_RATE_SLOW>;
+			power-source = <IO_STANDARD_LVCMOS18>;
+			bias-disable;
+		};
+		/*
+		mux-gpio {
+			groups   = "gpio7", "gpio24";
+			function = "gpio";
+		};
+		*/		
+	};
+	
+	pinctrl_sdhci0_default: sdhci0-default {
+		conf {
+			groups = "sdio0_0_grp";
+			slew-rate = <SLEW_RATE_SLOW>;
+			power-source = <IO_STANDARD_LVCMOS18>;
+			bias-disable;
+		};
+
+		mux {
+			groups = "sdio0_0_grp";
+			function = "sdio0";
+		};
+	};
+	
+	pinctrl_sdhci1_default: sdhci1-default {
+		mux {
+			groups = "sdio1_2_grp";
+			function = "sdio1";
+		};
+
+		conf {
+			groups = "sdio1_2_grp";
+			slew-rate = <SLEW_RATE_SLOW>;
+			power-source = <IO_STANDARD_LVCMOS18>;
+			bias-disable;
+		};
+
+		mux-cd {
+			groups = "sdio1_cd_0_grp";
+			function = "sdio1_cd";
+		};
+
+		conf-cd {
+			groups = "sdio1_cd_0_grp";
+			bias-high-impedance;
+			bias-pull-up;
+			slew-rate = <SLEW_RATE_SLOW>;
+			power-source = <IO_STANDARD_LVCMOS18>;
+		};
+	};
+
+	pinctrl_gpio_default: gpio-default {
+		mux-sw {
+			function = "gpio0";
+			groups = "gpio0_7_grp","gpio0_23_grp", "gpio0_24_grp", "gpio0_25_grp";
+		};
+
+		conf-sw {
+			groups = "gpio0_7_grp", "gpio0_23_grp", "gpio0_24_grp", "gpio0_25_grp";
+			slew-rate = <SLEW_RATE_SLOW>;
+			power-source = <IO_STANDARD_LVCMOS18>;
+		};
+
+		conf-pull-up {
+			pins = "MIO7", "MIO23", "MIO24", "MIO25";
+			bias-pull-up;
+		};
+
+	};
+};
+
+&ams_ps {
+	status = "okay";
+};
+
+&ams_pl {
+	status = "okay";
+};
+
+&pss_ref_clk {
+	clock-frequency = <33333333>;
+};
+
+&video_clk {
+	clock-frequency = <50000000>;
+};
+
+&fpd_dma_chan1 {
+	status = "okay";
+};
+&fpd_dma_chan2 {
+	status = "okay";
+};
+&fpd_dma_chan3 {
+	status = "okay";
+};
+&fpd_dma_chan4 {
+	status = "okay";
+};
+&fpd_dma_chan5 {
+	status = "okay";
+};
+&fpd_dma_chan6 {
+	status = "okay";
+};
+&fpd_dma_chan7 {
+	status = "okay";
+};
+&fpd_dma_chan8 {
+	status = "okay";
+};
+
+&gpu {
+	status = "okay";
+};
+
+&zynqmp_dpdma {
+	status = "okay";
+};
+
+&zynqmp_dpsub {
+	status = "okay";
+	phy-names = "dp-phy0";
+	phys = <&psgtr 3 PHY_TYPE_DP 0 1>;
+	xlnx,max-lanes = <1>;
+};
+
+/* Kernel xlnx 2023.2: il nodo dpsub non espone il grafo di porte DP
+ * (label out_dp assente, connettore gestito dal driver via AUX/HPD).
+ * Riattivare questo blocco e il nodo dpcon passando a un kernel con
+ * lo zynqmp.dtsi a ports (mainline >= 6.6 / vendor recenti).
+ * &out_dp {
+ * 	dpsub_dp_out: endpoint {
+ * 		remote-endpoint = <&dpcon_in>;
+ * 	};
+ * };
+ */
+
+&psgtr {
+    status = "okay";
+    /*
+     * Il 5P49V6965 è configurato da FSBL: Linux usa solo fixed-clock
+     * per comunicare le frequenze al driver psgtr, senza riprogrammare il chip.
+     *   MGTCLK0 (ref0) – 100 MHz → lane 2 USB3       (vc5 OUT1, settato da FSBL)
+     *   MGTCLK1 (ref1) – 27  MHz → lane 3 DP         (vc5 OUT2, settato da FSBL)
+     *   MGTCLK2 (ref2) – non usato
+     *   MGTCLK3 (ref3) – 100 MHz → lane 0+1 PCIe x2  (oscillatore esterno)
+     */
+    clocks = <&clock_usb100m>,   /* ref0 – MGTCLK0 – 100 MHz → USB3      */
+             <&clock_video27m>,  /* ref1 – MGTCLK1 – 27  MHz → DP        */
+             <&clock_sata100m>,  /* ref2 – MGTCLK2 – non usato           */
+             <&clock_pcie100m>;  /* ref3 – MGTCLK3 – 100 MHz → PCIe x2  */
+    clock-names = "ref0", "ref1", "ref2", "ref3";
+};
+
+/* PCIe x2: GTR lane 0+1, refclk 3 = MGTCLK3 = 100 MHz (oscillatore esterno).
+ * GPIO 78 (EMIO 0) abilita alimentazione M.2 prima del probe.
+ */
+&pcie {
+    status = "okay";
+    phys = <&psgtr 0 PHY_TYPE_PCIE 0 3>,  /* PCIe lane 0, controller instance 0, MGTCLK3 */
+           <&psgtr 1 PHY_TYPE_PCIE 1 3>;  /* PCIe lane 1, controller instance 1, MGTCLK3 */
+};
+
+/* ULPI SMSC USB3320 – GTR lane 2, refclk 0 = MGTCLK0 = 100 MHz (vc5 OUT1, settato da FSBL) */
+&usb0 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_usb0_default>;	
+	phy-names = "usb3-phy";
+	phys = <&psgtr 2 PHY_TYPE_USB3 0 0>;  /* lane 2, refclk 0 = MGTCLK0 = 100 MHz */
+};
+
+&dwc3_0 {
+	status = "okay";
+	dr_mode = "host";
+	maximum-speed = "super-speed";
+};
+
+
+
+

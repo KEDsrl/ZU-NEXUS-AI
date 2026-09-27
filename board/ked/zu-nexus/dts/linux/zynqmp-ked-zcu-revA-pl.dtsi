@@ -1,0 +1,491 @@
+/*
+ * system-user.dtsi - IMX219 camera pipeline for Zynq UltraScale+
+ *
+ * Versione self-contained per PL:
+ *   i nodi AXI/I2C/video sono dichiarati direttamente dentro &amba_pl,
+ *   quindi non servono frammenti tipo &axi_gpio_0 / &v_demosaic_0 già definiti dal DTG.
+ *
+ * Hardware source:
+ *   - system.mss
+ *   - ZCU-DM-X1-R0(1).tcl, Vivado 2022.2
+ *
+ * Pipeline:
+ *   IMX219 RAW10, 2 MIPI lanes
+ *      -> MIPI CSI-2 RX Subsystem
+ *      -> Sensor Demosaic
+ *      -> VPSS CSC-only (white balance / brightness / contrast, dominio lineare)
+ *      -> Gamma LUT (3x LUT R/G/B programmabili)
+ *      -> VPSS Scaler+CSC (runtime: YUV422 1080p per display DP,
+ *                           oppure RGB 640x640 per NPU DX-M1)
+ *      -> Frame Buffer Write 0 -> DDR   (canale singolo, modo programmabile)
+ *
+ * Vivado addresses / IRQs:
+ *   csi_iic                  @ 0x80010000, IRQ 92
+ *   mipi_csi2_rx_subsyst_0   @ 0x80020000, IRQ 89
+ *   v_demosaic_0             @ 0x80030000, IRQ 90
+ *   v_frmbuf_wr_0            @ 0x80040000, IRQ 91
+ *   ext_iic                  @ 0x80050000, IRQ 93
+ *   v_gamma_lut_0            @ 0x80080000, IRQ 94
+ *   axi_gpio_0               @ 0x80060000
+ *   v_proc_ss_0              @ 0x80100000
+ *   v_proc_ss_2              @ 0x80300000           (CSC only, white balance)
+ *
+ * Clocking from TCL:
+ *   PL0 = zynqmp_clk 71 = 150 MHz, used for AXI-Lite and video clocks
+ *   PL1 = zynqmp_clk 72 = 200 MHz, used in HW for MIPI D-PHY clock
+ *
+ * Reset GPIOs from TCL:
+ *   axi_gpio_0 bit 0 -> v_demosaic_0 resetn combiner
+ *   axi_gpio_0 bit 1 -> v_proc_ss_0 resetn combiner
+ *   axi_gpio_0 bit 2 -> v_frmbuf_wr_0 resetn combiner
+ *   axi_gpio_0 bit 3 -> mipi csi2 rx video_aresetn
+ *   axi_gpio_0 bit 6 -> v_proc_ss_2 (CSC) resetn combiner
+ *   axi_gpio_0 bit 7 -> v_gamma_lut_0 resetn combiner
+ *
+ * Hardware reset equation:
+ *   ip_resetn = peripheral_aresetn AND gpio_resetn
+ */
+
+#include <dt-bindings/gpio/gpio.h>
+
+/ {
+	/* IMX219 external clock. Use 24 MHz unless the board has a different XCLK. */
+	imx219_xclk: imx219-xclk {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24000000>;
+	};
+
+	/* Fixed regulators are valid if the camera rails are always enabled on the board. */
+	imx219_vana: regulator-imx219-vana {
+		compatible = "regulator-fixed";
+		regulator-name = "imx219_vana_2v8";
+		regulator-min-microvolt = <2800000>;
+		regulator-max-microvolt = <2800000>;
+	};
+
+	imx219_vdig: regulator-imx219-vdig {
+		compatible = "regulator-fixed";
+		regulator-name = "imx219_vdig_1v8";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+	};
+
+	imx219_vddl: regulator-imx219-vddl {
+		compatible = "regulator-fixed";
+		regulator-name = "imx219_vddl_1v2";
+		regulator-min-microvolt = <1200000>;
+		regulator-max-microvolt = <1200000>;
+	};
+};
+
+/ {
+	amba_pl: amba_pl@0 {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		compatible = "simple-bus";
+		ranges ;
+				
+		AXI_DNA_0: AXI_DNA@80000000 {
+			/* This is a place holder node for a custom IP, user may need to update the entries */
+			clock-names = "s00_axi_aclk";
+			clocks = <&zynqmp_clk 71>;
+			compatible = "xlnx,AXI-DNA-1.0";
+			reg = <0x0 0x80000000 0x0 0x10000>;
+			xlnx,s00-axi-addr-width = <0x4>;
+			xlnx,s00-axi-data-width = <0x20>;
+		};
+		
+		/* Camera control I2C bus: csi_iic @ 0x80010000, 400 kHz. */
+		csi_iic: i2c@80010000 {
+			status = "okay";
+			compatible = "xlnx,axi-iic-2.1", "xlnx,xps-iic-2.00.a";
+			reg = <0x0 0x80010000 0x0 0x10000>;
+			interrupt-parent = <&gic>;
+			interrupts = <0 92 4>;
+			interrupt-names = "iic2intc_irpt";
+			clock-names = "s_axi_aclk";
+			clocks = <&zynqmp_clk 71>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			clock-frequency = <400000>;
+
+			imx219: camera@10 {
+				compatible = "sony,imx219";
+				reg = <0x10>;
+
+				clocks = <&imx219_xclk>;
+
+				VANA-supply = <&imx219_vana>;
+				VDIG-supply = <&imx219_vdig>;
+				VDDL-supply = <&imx219_vddl>;
+
+				/*
+				 * MIO55 controls the camera PWDN pin.
+				 * For a standard active-high PWDN signal:
+				 *   physical 1 = power-down / disabled
+				 *   physical 0 = enabled
+				 */
+				reset-gpios = <&gpio 55 GPIO_ACTIVE_LOW>;
+	
+				port {
+					imx219_out: endpoint {
+						remote-endpoint = <&csiss_in>;
+						data-lanes = <1 2>;
+						clock-noncontinuous;
+						link-frequencies = /bits/ 64 <456000000>;
+					};
+				};
+			};
+		};
+
+		/* MIPI CSI-2 RX Subsystem.
+		 * Vivado IP: v5.2, RAW10, 2 lanes, active lanes enabled, VFB enabled.
+		 * Linux binding compatible commonly used for this IP generation is v5.0.
+		 */
+		mipi_csi2_rx_subsyst_0: csi2rx@80020000 {
+			status = "okay";
+			compatible = "xlnx,mipi-csi2-rx-subsystem-5.0";
+			reg = <0x0 0x80020000 0x0 0x2000>;
+			interrupt-parent = <&gic>;
+			interrupts = <0 89 4>;
+			interrupt-names = "csirxss_csi_irq";
+
+			clock-names = "lite_aclk", "video_aclk";
+			clocks = <&zynqmp_clk 71>, <&zynqmp_clk 71>;
+
+			xlnx,csi-pxl-format = <0x2b>; /* RAW10 */
+			xlnx,vfb;
+			xlnx,en-active-lanes;
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+					csiss_in: endpoint {
+						remote-endpoint = <&imx219_out>;
+						data-lanes = <1 2>;
+					};
+				};
+
+				port@1 {
+					reg = <1>;
+					csiss_out: endpoint {
+						remote-endpoint = <&demosaic_in>;
+					};
+				};
+			};
+		};
+
+		/* Sensor Demosaic: Bayer RAW10 input to RGB output. */
+		v_demosaic_0: demosaic@80030000 {
+			status = "okay";
+			compatible = "xlnx,v-demosaic-1.1", "xlnx,v-demosaic";
+			reg = <0x0 0x80030000 0x0 0x10000>;
+			clock-names = "ap_clk";
+			clocks = <&zynqmp_clk 71>;
+			interrupt-parent = <&gic>;
+			interrupts = <0 90 4>;
+			interrupt-names = "interrupt";
+
+			reset-gpios = <&axi_gpio_0 0 GPIO_ACTIVE_LOW>;
+
+			/* The TCL does not export max image size. Keep this coherent with 150 MHz / 1 PPC. */
+			xlnx,max-width = <1920>;
+			xlnx,max-height = <1080>;
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+					demosaic_in: endpoint {
+						remote-endpoint = <&csiss_out>;
+					};
+				};
+
+				port@1 {
+					reg = <1>;
+					demosaic_out: endpoint {
+						remote-endpoint = <&csc_in>;
+					};
+				};
+			};
+		};
+
+		/* Video Frame Buffer Write.
+		 * Vivado IP: v2.4. Linux compatible for this generation is axi-frmbuf-wr-v2.2.
+		 * TCL: SAMPLES_PER_CLOCK=1, MAX_DATA_WIDTH=10.
+		 */
+		v_frmbuf_wr_0: dma@80040000 {
+			status = "okay";
+			compatible = "xlnx,axi-frmbuf-wr-v2.2";
+			#dma-cells = <1>;
+			reg = <0x0 0x80040000 0x0 0x10000>;
+			clock-names = "ap_clk";
+			clocks = <&zynqmp_clk 71>;
+			interrupt-parent = <&gic>;
+			interrupts = <0 91 4>;
+			interrupt-names = "interrupt";
+
+			reset-gpios = <&axi_gpio_0 2 GPIO_ACTIVE_LOW>;
+
+			/* Il master AXI del frmbuf e' cablato (TCL: axi_smc/M00_AXI)
+			 * su S_AXI_HPC0_FPD, cioe' la porta COERENTE via CCI-400.
+			 * Senza questa proprieta' Linux tratta il device come non
+			 * coerente e vb2-dma-contig alloca i buffer NON CACHEABLE:
+			 * la CPU li legge a ~4 MB/s (misurato: videoconvert 3,5 fps
+			 * contro 90 fps su memoria normale). Con dma-coherent i
+			 * buffer diventano cacheable e la coerenza la garantisce CCI.
+			 *
+			 * ATTENZIONE: richiede che la coerenza sia realmente attiva
+			 * in HW (CCI snooping abilitato + AxCACHE/AxDOMAIN corretti
+			 * dal master). Se non lo fosse, la CPU leggerebbe dati stantii
+			 * dalla cache -> immagine corrotta/tearing. Verificare.
+			 */
+			dma-coherent;
+
+			xlnx,dma-addr-width = <32>;
+			/* ATTENZIONE: nel driver xilinx_frmbuf.c i nomi DTS sono
+			 * INVERTITI rispetto al fourcc V4L2 che espongono. Tabella
+			 * (nome DTS -> CONFIG richiesto nel TCL -> fourcc V4L2):
+			 *   "rgb888"      -> HAS_BGR8       -> BGR3
+			 *   "bgr888"      -> HAS_RGB8       -> RGB3   (dxpreprocess)
+			 *   "xrgb8888"    -> HAS_BGRX8      -> XBGR32
+			 *   "xbgr8888"    -> HAS_RGBX8      -> BGRX32
+			 *   "xbgr2101010" -> HAS_RGBX10     -> XBGR30
+			 *   "uyvy"        -> HAS_UYVY8      -> UYVY
+			 *   "yuyv"        -> HAS_YUYV8      -> YUYV
+			 *   "vuy888"      -> HAS_YUV8       -> VUY24
+			 *   "xvuy8888"    -> HAS_YUVX8      -> XVUY32
+			 *   "nv16"        -> HAS_Y_UV8      -> NV16
+			 *   "nv12"        -> HAS_Y_UV8_420  -> NV12
+			 *   "xv20"        -> HAS_Y_UV10     -> XV20
+			 *   "xv15"        -> HAS_Y_UV10_420 -> XV15
+			 * Il driver NON valida contro l'IP: un nome dichiarato ma non
+			 * implementato in hardware viene accettato e produce dati NON
+			 * VALIDI (nessun errore). Questa lista deve restare allineata
+			 * ai CONFIG.HAS_* del v_frmbuf_wr_0 nel TCL.
+			 */
+			xlnx,vid-formats = "rgb888", "bgr888",
+					   "xrgb8888", "xbgr8888", "xbgr2101010",
+					   "uyvy", "yuyv", "vuy888", "xvuy8888",
+					   "nv16", "nv12", "xv20", "xv15";
+			xlnx,pixels-per-clock = <1>;
+			xlnx,dma-align = <8>;
+			xlnx,max-width = <1920>;
+			xlnx,max-height = <1080>;
+		};
+
+		/* Optional external I2C bus present in the TCL. Not part of the camera pipeline. */
+		ext_iic: i2c@80050000 {
+			status = "okay";
+			compatible = "xlnx,axi-iic-2.1", "xlnx,xps-iic-2.00.a";
+			reg = <0x0 0x80050000 0x0 0x10000>;
+			interrupt-parent = <&gic>;
+			interrupts = <0 93 4>;
+			interrupt-names = "iic2intc_irpt";
+			clock-names = "s_axi_aclk";
+			clocks = <&zynqmp_clk 71>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			clock-frequency = <400000>;
+		};
+
+		/* AXI GPIO used by Linux as reset controller for the video IPs.
+		 * Vivado: C_GPIO_WIDTH=8, C_ALL_OUTPUTS=1, C_DOUT_DEFAULT=0xffffffff.
+		 */
+		axi_gpio_0: gpio@80060000 {
+			status = "okay";
+			compatible = "xlnx,xps-gpio-1.00.a";
+			reg = <0x0 0x80060000 0x0 0x10000>;
+			clocks = <&zynqmp_clk 71>;
+
+			gpio-controller;
+			#gpio-cells = <2>;
+
+			xlnx,gpio-width = <8>;
+			xlnx,all-inputs = <0x0>;
+			xlnx,all-outputs = <0xff>;
+			xlnx,dout-default = <0xff>;
+			xlnx,tri-default = <0x0>;
+			xlnx,is-dual = <0>;
+
+			gpio-line-names =
+				"demosaic_resetn",
+				"vpss0_resetn",
+				"frmbuf_wr0_resetn",
+				"csi_video_resetn",
+				"video_reset_unused4",
+				"video_reset_unused5",
+				"csc_resetn",
+				"gamma_resetn";
+		};
+
+		/* VPSS Scaler, streaming-only, no internal DMA.
+		 * TCL: C_SAMPLES_PER_CLK=1, C_SCALER_ALGORITHM=2 polyphase.
+		 */
+		v_proc_ss_0: vpss@80100000 {
+			status = "okay";
+			compatible = "xlnx,v-vpss-scaler-2.2", "xlnx,v-vpss-scaler";
+			reg = <0x0 0x80100000 0x0 0x100000>;
+
+			clock-names = "aclk_axis", "aclk_ctrl";
+			clocks = <&zynqmp_clk 71>, <&zynqmp_clk 71>;
+
+			reset-gpios = <&axi_gpio_0 1 GPIO_ACTIVE_LOW>;
+
+			/* The TCL does not export max image size. Keep this coherent with 150 MHz / 1 PPC. */
+			xlnx,max-width = <1920>;
+			xlnx,max-height = <1080>;
+			xlnx,num-hori-taps = <8>;
+			xlnx,num-vert-taps = <8>;
+			xlnx,pix-per-clk = <1>;
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+					xlnx,video-format = <0>; /* RGB */
+					xlnx,video-width = <10>;
+					vpss0_in: endpoint {
+						remote-endpoint = <&gamma_out>;
+					};
+				};
+
+				port@1 {
+					reg = <1>;
+					/* modo display: YUV422 1080p; modo NPU: riconfigurata a
+					 * runtime in RGB 640x640 via media-ctl (v. setup_pipeline.sh)
+					 */
+					xlnx,video-format = <2>; /* default: YUV 4:2:2 */
+					xlnx,video-width = <8>;
+					vpss0_out: endpoint {
+						remote-endpoint = <&vcap_imx219_in0>;
+					};
+				};
+			};
+		};
+
+		/* VPSS CSC-only: white balance (red/green/blue gain), brightness, contrast.
+		 * Applicato in dominio lineare, prima della gamma. Controlli V4L2 sul subdev.
+		 */
+		v_proc_ss_2: csc@80300000 {
+			status = "okay";
+			compatible = "xlnx,v-vpss-csc";
+			reg = <0x0 0x80300000 0x0 0x100000>;
+
+			clocks = <&zynqmp_clk 71>;
+			clock-names = "aclk";
+
+			reset-gpios = <&axi_gpio_0 6 GPIO_ACTIVE_LOW>;
+
+			xlnx,max-width = <1920>;
+			xlnx,max-height = <1080>;
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+					xlnx,video-format = <0>; /* RGB */
+					xlnx,video-width = <10>;
+					csc_in: endpoint {
+						remote-endpoint = <&demosaic_out>;
+					};
+				};
+
+				port@1 {
+					reg = <1>;
+					xlnx,video-format = <0>; /* RGB */
+					xlnx,video-width = <10>;
+					csc_out: endpoint {
+						remote-endpoint = <&gamma_in>;
+					};
+				};
+			};
+		};
+
+		/* Gamma LUT: tre LUT indipendenti R/G/B, 10 bit (1024 entry per canale). */
+		v_gamma_lut_0: gamma@80080000 {
+			status = "okay";
+			compatible = "xlnx,v-gamma-lut";
+			reg = <0x0 0x80080000 0x0 0x10000>;
+			clocks = <&zynqmp_clk 71>;
+			clock-names = "ap_clk";
+			interrupt-parent = <&gic>;
+			interrupts = <0 94 4>;
+			interrupt-names = "interrupt";
+
+			reset-gpios = <&axi_gpio_0 7 GPIO_ACTIVE_LOW>;
+
+			xlnx,max-width = <1920>;
+			xlnx,max-height = <1080>;
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+					xlnx,video-format = <0>; /* RGB */
+					xlnx,video-width = <10>;
+					gamma_in: endpoint {
+						remote-endpoint = <&csc_out>;
+					};
+				};
+
+				port@1 {
+					reg = <1>;
+					xlnx,video-format = <0>; /* RGB */
+					xlnx,video-width = <10>;
+					gamma_out: endpoint {
+						remote-endpoint = <&vpss0_in>;
+					};
+				};
+			};
+		};
+
+		/* Xilinx V4L2 capture: canale singolo (/dev/video0); il formato di
+		 * uscita si sceglie a runtime riconfigurando la VPSS (YUV o RGB).
+		 */
+		vcap_imx219: vcap-imx219 {
+			compatible = "xlnx,video";
+			dmas = <&v_frmbuf_wr_0 0>;
+			dma-names = "port0";
+
+			/* I buffer V4L2 li alloca vb2-dma-contig usando QUESTO
+			 * device: xilinx-dma.c fa "dma->queue.dev = dma->xdev->dev",
+			 * cioe' il composite vcap, non il nodo del frmbuf. Quindi
+			 * e' qui che dma-coherent decide se i buffer sono cacheable.
+			 * Il DMA reale lo fa il frmbuf, cablato su S_AXI_HPC0_FPD
+			 * (porta coerente via CCI-400), quindi la coerenza HW c'e'.
+			 * Senza questa riga i buffer sono uncached e la CPU li legge
+			 * a ~4 MB/s (videoconvert 3,5 fps contro 90 su memoria normale).
+			 */
+			dma-coherent;
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+					direction = "input";
+					vcap_imx219_in0: endpoint {
+						remote-endpoint = <&vpss0_out>;
+					};
+				};
+			};
+		};
+	};
+
+};
+
+

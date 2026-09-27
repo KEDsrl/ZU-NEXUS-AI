@@ -1,0 +1,11 @@
+[Unit]
+Description=DeepX DX-M1 runtime daemon
+After=systemd-modules-load.service systemd-udevd.service
+
+[Service]
+ExecStart=/usr/bin/dxrtd
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

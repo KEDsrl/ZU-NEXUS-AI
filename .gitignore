@@ -1,0 +1,33 @@
+# --- Buildroot / output di build ---------------------------------------------
+output/
+buildroot/
+*.o
+*.so
+*.a
+
+# --- Vivado ------------------------------------------------------------------
+# Il progetto si rigenera dal TCL: nel repo va SOLO il TCL, non il progetto.
+vivado/*.xpr
+vivado/*.cache/
+vivado/*.hw/
+vivado/*.ip_user_files/
+vivado/*.runs/
+vivado/*.sim/
+vivado/*.gen/
+vivado/*.jou
+vivado/*.log
+vivado/*.str
+.Xil/
+
+# --- File grandi che non vanno versionati ------------------------------------
+# y4m e' video NON compresso (~41 MB/s a 720p30): distribuirlo a parte.
+media/*.y4m
+# modelli DeepX: si scaricano da sdk.deepx.ai
+*.dxnn
+# bitstream: opzionale, decommentare se non lo si vuole nel repo
+# board/ked/zu-nexus/boot/*.bit
+
+# --- varie -------------------------------------------------------------------
+*~
+*.swp
+.DS_Store

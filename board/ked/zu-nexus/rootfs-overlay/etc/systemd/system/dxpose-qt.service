@@ -1,0 +1,61 @@
+[Unit]
+Description=dxpose-qt - visualizzatore IMX219 + DX-M1 (utente ked)
+# Weston gira come 'ked': l'app deve girare con lo stesso utente e la stessa
+# XDG_RUNTIME_DIR, altrimenti non trova il socket wayland.
+After=weston.service
+Requires=weston.service
+# Il socket wayland muore con Weston: se Weston si ferma o riparte, questa unit
+# deve seguirlo (altrimenti resterebbe a fare abort in loop).
+PartOf=weston.service
+# video-pipeline.service configura la catena in modo 'display'. L'app la
+# riconfigura da sola (modo NPU) via ioctl: le due cose confliggono, quindi NON
+# dipendiamo da lui. Se e' abilitato, l'ultima configurazione vince ed e' quella
+# dell'app, che parte dopo.
+
+[Service]
+User=ked
+Group=ked
+# video/render: /dev/video*, /dev/media*, /dev/v4l-subdev* e DRM.
+# /dev/dxrt0 e' 0666, non serve un gruppo dedicato.
+SupplementaryGroups=video render input
+Environment=XDG_RUNTIME_DIR=/run/user/1001
+Environment=QT_QPA_PLATFORM=wayland
+# Opzioni aggiuntive dell'app senza ricompilare (es. --rgb dopo il bitstream
+# con HAS_RGB8). File opzionale: il '-' evita errori se manca.
+EnvironmentFile=-/etc/default/dxpose-qt
+# Stato persistente dell'app (/var/lib/dxpose-qt, di proprieta' di ked): li'
+# si registra l'esito dell'aggiornamento firmware del DX-M1, cosi' dopo il flash
+# un semplice reboot non provoca un secondo flash (serve un power cycle).
+StateDirectory=dxpose-qt
+# Un flash del firmware non va interrotto: lasciamo tempo allo stop.
+TimeoutStopSec=300
+# NB: NON dichiarare RuntimeDirectory=user/1001 qui: la crea gia' weston.service
+# e systemd la CANCELLA quando l'unit che la dichiara si ferma.
+
+# Il socket wayland compare qualche istante dopo l'avvio di Weston: After= non
+# basta, aspettiamo il file vero. Il pattern wayland-[0-9] esclude i .lock.
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 40); do ls /run/user/1001/wayland-[0-9] >/dev/null 2>&1 && exit 0; sleep 0.25; done; echo "socket wayland assente dopo 10s" >&2; exit 1'
+
+# WAYLAND_DISPLAY va RILEVATO, non cablato: weston.service ha
+# RuntimeDirectory=user/1001, quindi /run/user/1001 viene ricreata a ogni suo
+# riavvio e il socket puo' essere wayland-0 oppure wayland-1. Senza questa
+# variabile Qt prova il default wayland-0, non si connette e fa qFatal ->
+# SIGABRT all'avvio (audit sig=6) con systemd che riavvia all'infinito.
+ExecStart=/bin/sh -c 'WAYLAND_DISPLAY=$(cd /run/user/1001 && ls wayland-[0-9] 2>/dev/null | head -1); \
+    [ -n "$WAYLAND_DISPLAY" ] || { echo "nessun socket wayland in /run/user/1001" >&2; exit 1; }; \
+    export WAYLAND_DISPLAY; \
+    echo "dxpose-qt: uso WAYLAND_DISPLAY=$WAYLAND_DISPLAY"; \
+    exec /usr/bin/dxpose-qt \
+        --models-dir=/home/ked/models \
+        --configs-dir=/usr/share/gstdxstream/configs \
+        --pp-lib=/usr/share/gstdxstream/lib/libpostprocess_ppu.so \
+        --fallback-file=/usr/share/dxpose-qt/media/dron_720p.y4m \
+        --fallback-dir=/home/ked/videos \
+        --model=YoloV5S_PPU \
+        --width=1280 --height=720 --fps=30 \
+        --exit-on-fault $DXPOSE_ARGS'
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

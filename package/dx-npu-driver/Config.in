@@ -1,0 +1,9 @@
+config BR2_PACKAGE_DX_NPU_DRIVER
+	bool "dx-npu-driver"
+	depends on BR2_LINUX_KERNEL
+	help
+	  DeepX DX-M1 NPU Linux kernel driver (dxrt_driver + dx_dma,
+	  variante PCIe DeepX). Sorgente: DEEPX-AI/dx_rt_npu_linux_driver.
+
+comment "dx-npu-driver needs a Linux kernel to be built"
+	depends on !BR2_LINUX_KERNEL

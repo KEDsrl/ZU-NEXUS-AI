@@ -1,0 +1,83 @@
+From: KED BSP <bsp@ked.local>
+Subject: [PATCH] dxinfer: expose last inference latency and NPU time
+
+dxinfer already reads InferenceEngine::GetLatency() on every buffer but only
+uses it internally (throttling) and in a debug print. Expose the last values
+as read-only properties so applications can show them:
+
+  last-latency-us    GetLatency()           total inference latency, us
+                                            (includes host<->NPU transfers)
+  last-npu-time-us   GetNpuInferenceTime()  pure NPU compute time, us
+
+Both are written atomically from the streaming thread and read with
+g_object_get() from any thread.
+
+Upstream status: not submitted
+---
+diff -ruN a/gst-dxstream-plugin/src/gst-dxinfer.cpp b/gst-dxstream-plugin/src/gst-dxinfer.cpp
+--- a/gst-dxstream-plugin/src/gst-dxinfer.cpp	2026-09-21 23:41:55.160543706 +0000
++++ b/gst-dxstream-plugin/src/gst-dxinfer.cpp	2026-09-21 23:41:55.195466279 +0000
+@@ -15,6 +15,8 @@
+     PROP_MODEL_PATH,
+     PROP_CONFIG_PATH,
+     PROP_USE_ORT,
++    PROP_LAST_LATENCY_US,
++    PROP_LAST_NPU_TIME_US,
+     N_PROPERTIES
+ };
+ 
+@@ -207,6 +209,12 @@
+     case PropertyID::PROP_USE_ORT:
+         g_value_set_boolean(value, self->_use_ort);
+         break;
++    case PropertyID::PROP_LAST_LATENCY_US:
++        g_value_set_int(value, g_atomic_int_get(&self->_last_latency_us));
++        break;
++    case PropertyID::PROP_LAST_NPU_TIME_US:
++        g_value_set_int(value, g_atomic_int_get(&self->_last_npu_time_us));
++        break;
+     default:
+         G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
+         break;
+@@ -422,6 +430,16 @@
+         "use-ort", "use ort",
+         "Determines whether to use ONNX Runtime for inference.",
+         TRUE, G_PARAM_READWRITE);
++    obj_properties[static_cast<int>(PropertyID::PROP_LAST_LATENCY_US)] = g_param_spec_int(
++        "last-latency-us", "last latency (us)",
++        "Latency of the most recent inference in microseconds, including "
++        "host<->NPU transfers (dx_rt InferenceEngine::GetLatency).",
++        0, G_MAXINT, 0, G_PARAM_READABLE);
++    obj_properties[static_cast<int>(PropertyID::PROP_LAST_NPU_TIME_US)] = g_param_spec_int(
++        "last-npu-time-us", "last NPU time (us)",
++        "Pure NPU processing time of the most recent inference in microseconds "
++        "(dx_rt InferenceEngine::GetNpuInferenceTime).",
++        0, G_MAXINT, 0, G_PARAM_READABLE);
+ 
+     g_object_class_install_properties(gobject_class, static_cast<int>(PropertyID::N_PROPERTIES),
+                                       obj_properties.data());
+@@ -861,6 +879,8 @@
+     }
+ 
+     auto latency = (gint64)self->_ie->GetLatency();
++    g_atomic_int_set(&self->_last_latency_us, (gint)latency);
++    g_atomic_int_set(&self->_last_npu_time_us, (gint)self->_ie->GetNpuInferenceTime());
+ 
+     if (g_queue_get_length(self->_timing_ctx.recent_latencies) == 10) {
+         g_queue_pop_head(self->_timing_ctx.recent_latencies);
+diff -ruN a/gst-dxstream-plugin/src/gst-dxinfer.hpp b/gst-dxstream-plugin/src/gst-dxinfer.hpp
+--- a/gst-dxstream-plugin/src/gst-dxinfer.hpp	2026-09-21 23:41:55.162694777 +0000
++++ b/gst-dxstream-plugin/src/gst-dxinfer.hpp	2026-09-21 23:41:55.195189744 +0000
+@@ -65,6 +65,12 @@
+     GstDxInferPushContext _push_ctx;
+     GstDxInferEosContext _eos_ctx;
+     GstDxInferTimingContext _timing_ctx;
++
++    /* Ultima misura del runtime dx_rt, in microsecondi (esposte come
++     * proprieta' in sola lettura). Accesso atomico: scritte dal thread di
++     * streaming, lette dall'applicazione con g_object_get(). */
++    gint _last_latency_us;
++    gint _last_npu_time_us;
+ };
+ 
+ using GstDxInfer = struct _GstDxInfer;

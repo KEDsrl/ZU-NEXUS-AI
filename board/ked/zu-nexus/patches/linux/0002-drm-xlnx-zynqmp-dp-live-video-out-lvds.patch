@@ -1,0 +1,211 @@
+From fbb01d2e2f4cbf5cabe6fec4fb007b527bc45a4d Mon Sep 17 00:00:00 2001
+From: KED <dev@ked.local>
+Date: Sat, 11 Jul 2026 17:40:57 +0000
+Subject: [PATCH] drm: xlnx: zynqmp-dp: DT opts skip-phy, force-connected,
+ fixed mode (live video out LVDS)
+
+Port su linux-xlnx xilinx-v2023.2 (6.1) della patch validata su 5.15:
+- xlnx,skip-phy: opera senza PHY PS DP (probe/bind/remove/PM condizionali)
+- xlnx,force-connected: connettore sempre connesso, bypass HPD/AUX,
+  polling HPD disabilitato
+- display-timings: modo fisso preferred dal DT al posto dell'EDID
+Abilita pipeline PL live video out (es. bridge LVDS) con clock/timing
+generati in PL.
+---
+ drivers/gpu/drm/xlnx/zynqmp_dp.c | 102 +++++++++++++++++++++++++++----
+ 1 file changed, 89 insertions(+), 13 deletions(-)
+
+diff --git a/drivers/gpu/drm/xlnx/zynqmp_dp.c b/drivers/gpu/drm/xlnx/zynqmp_dp.c
+index d5152f2..9c951ac 100644
+--- a/drivers/gpu/drm/xlnx/zynqmp_dp.c
++++ b/drivers/gpu/drm/xlnx/zynqmp_dp.c
+@@ -26,6 +26,10 @@
+ #include <linux/pm_runtime.h>
+ #include <linux/phy/phy.h>
+ #include <linux/reset.h>
++#include <drm/drm_modes.h>
++#include <video/of_display_timing.h>
++#include <video/display_timing.h>
++#include <video/videomode.h>
+ #include <linux/uaccess.h>
+ 
+ #include "zynqmp_disp.h"
+@@ -344,6 +348,12 @@ struct zynqmp_dp {
+ 	struct zynqmp_dp_link_config link_config;
+ 	struct zynqmp_dp_mode mode;
+ 	u8 train_set[ZYNQMP_DP_MAX_LANES];
++
++	/* Optional behaviours (DT-driven, live video out senza sink DP) */
++	bool force_connected;	/* xlnx,force-connected: salta HPD/AUX */
++	bool have_fixed_mode;	/* display-timings presente nel DT */
++	bool skip_phy;		/* xlnx,skip-phy: non usare la PHY PS DP */
++	struct drm_display_mode fixed_mode;
+ };
+ 
+ static inline struct zynqmp_dp *encoder_to_dp(struct drm_encoder *encoder)
+@@ -643,7 +653,8 @@ void zynqmp_dp_disable_vblank(struct zynqmp_dp *dp)
+  */
+ void zynqmp_dp_pm_resume(struct zynqmp_dp *dp)
+ {
+-	zynqmp_dp_phy_init(dp);
++	if (!dp->skip_phy)
++		zynqmp_dp_phy_init(dp);
+ }
+ 
+ /**
+@@ -654,7 +665,8 @@ void zynqmp_dp_pm_resume(struct zynqmp_dp *dp)
+  */
+ void zynqmp_dp_pm_suspend(struct zynqmp_dp *dp)
+ {
+-	zynqmp_dp_phy_exit(dp);
++	if (!dp->skip_phy)
++		zynqmp_dp_phy_exit(dp);
+ }
+ 
+ /*
+@@ -1441,6 +1453,14 @@ zynqmp_dp_connector_detect(struct drm_connector *connector, bool force)
+ 	u32 state, i;
+ 	int ret;
+ 
++	/* DT override: connettore sempre connesso, niente HPD/AUX */
++	if (dp->force_connected) {
++		dp->status = connector_status_connected;
++		link_config->max_rate = DP_HIGH_BIT_RATE2;
++		link_config->max_lanes = dp->num_lanes ? dp->num_lanes : 1;
++		return connector_status_connected;
++	}
++
+ 	/*
+ 	 * This is from heuristic. It takes some delay (ex, 100 ~ 500 msec) to
+ 	 * get the HPD signal with some monitors.
+@@ -1488,6 +1508,22 @@ static int zynqmp_dp_connector_get_modes(struct drm_connector *connector)
+ 	struct edid *edid;
+ 	int ret;
+ 
++	/* modo fisso da display-timings: ha precedenza sull'EDID */
++	if (dp->have_fixed_mode) {
++		struct drm_display_mode *m;
++
++		m = drm_mode_duplicate(connector->dev, &dp->fixed_mode);
++		if (!m)
++			return 0;
++		m->type |= DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED;
++		drm_mode_probed_add(connector, m);
++		return 1;
++	}
++
++	/* connettore forzato senza modo fisso: niente letture EDID/AUX */
++	if (dp->force_connected)
++		return 0;
++
+ 	edid = drm_get_edid(connector, &dp->aux.ddc);
+ 	if (!edid)
+ 		return 0;
+@@ -1764,7 +1800,8 @@ int zynqmp_dp_bind(struct device *dev, struct device *master, void *data)
+ 	struct drm_device *drm = data;
+ 	int ret;
+ 
+-	if (!dp->num_lanes)
++	/* con skip-phy la pipeline DRM/KMS va comunque costruita */
++	if (!dp->num_lanes && !dp->skip_phy)
+ 		return 0;
+ 
+ 	encoder->possible_crtcs |= zynqmp_disp_get_crtc_mask(dpsub->disp);
+@@ -1776,7 +1813,7 @@ int zynqmp_dp_bind(struct device *dev, struct device *master, void *data)
+ 			 DRM_MODE_ENCODER_TMDS, NULL);
+ 	drm_encoder_helper_add(encoder, &zynqmp_dp_encoder_helper_funcs);
+ 
+-	connector->polled = DRM_CONNECTOR_POLL_HPD;
++	connector->polled = dp->force_connected ? 0 : DRM_CONNECTOR_POLL_HPD;
+ 	ret = drm_connector_init(encoder->dev, connector,
+ 				 &zynqmp_dp_connector_funcs,
+ 				 DRM_MODE_CONNECTOR_DisplayPort);
+@@ -1830,7 +1867,7 @@ void zynqmp_dp_unbind(struct device *dev, struct device *master, void *data)
+ 	struct zynqmp_dp *dp = dpsub->dp;
+ 
+ 	disable_irq(dp->irq);
+-	if (!dp->num_lanes)
++	if (!dp->num_lanes && !dp->skip_phy)
+ 		return;
+ 
+ 	cancel_delayed_work_sync(&dp->hpd_work);
+@@ -1930,13 +1967,50 @@ int zynqmp_dp_probe(struct platform_device *pdev)
+ 	zynqmp_dp_write(dp->iomem, ZYNQMP_DP_TX_FORCE_SCRAMBLER_RESET, 1);
+ 	zynqmp_dp_write(dp->iomem, ZYNQMP_DP_TX_ENABLE, 0);
+ 
+-	ret = zynqmp_dp_phy_probe(dp);
+-	if (ret)
+-		goto err_reset;
++	/* Opzioni DT per live video out (es. bridge LVDS in PL) */
++	dp->skip_phy = of_property_read_bool(pdev->dev.of_node, "xlnx,skip-phy");
++	if (dp->skip_phy)
++		dev_info(dp->dev, "DP: PS PHY skipped (xlnx,skip-phy)\n");
++
++	dp->force_connected = of_property_read_bool(pdev->dev.of_node,
++						    "xlnx,force-connected");
++	if (dp->force_connected)
++		dev_info(dp->dev, "DP connector forced connected by DT\n");
++
++	{
++		struct display_timings *timings;
++
++		timings = of_get_display_timings(pdev->dev.of_node);
++		if (timings) {
++			struct display_timing *dt;
++			struct videomode vm;
++
++			dt = display_timings_get(timings, timings->native_mode);
++			if (dt) {
++				videomode_from_timing(dt, &vm);
++				drm_display_mode_from_videomode(&vm,
++								&dp->fixed_mode);
++				drm_mode_set_name(&dp->fixed_mode);
++				dp->have_fixed_mode = true;
++				dev_info(dp->dev,
++					 "DP fixed mode from DT: %s%s\n",
++					 dp->fixed_mode.name,
++					 dp->force_connected ?
++						" (forced connected)" : "");
++			}
++			display_timings_release(timings);
++		}
++	}
+ 
+-	ret = zynqmp_dp_phy_init(dp);
+-	if (ret)
+-		goto error_phy;
++	if (!dp->skip_phy) {
++		ret = zynqmp_dp_phy_probe(dp);
++		if (ret)
++			goto err_reset;
++
++		ret = zynqmp_dp_phy_init(dp);
++		if (ret)
++			goto error_phy;
++	}
+ 
+ 	dp->aux.name = "ZynqMP DP AUX";
+ 	dp->aux.dev = dp->dev;
+@@ -1982,7 +2056,8 @@ int zynqmp_dp_probe(struct platform_device *pdev)
+ error:
+ 	drm_dp_aux_unregister(&dp->aux);
+ error_phy:
+-	zynqmp_dp_phy_exit(dp);
++	if (!dp->skip_phy)
++		zynqmp_dp_phy_exit(dp);
+ err_reset:
+ 	zynqmp_dp_reset(dp, true);
+ 
+@@ -1996,7 +2071,8 @@ int zynqmp_dp_remove(struct platform_device *pdev)
+ 
+ 	zynqmp_dp_write(dp->iomem, ZYNQMP_DP_TX_ENABLE, 0);
+ 	drm_dp_aux_unregister(&dp->aux);
+-	zynqmp_dp_phy_exit(dp);
++	if (!dp->skip_phy)
++		zynqmp_dp_phy_exit(dp);
+ 	zynqmp_dp_reset(dp, true);
+ 	dpsub->dp = NULL;
+ 
+-- 
+2.43.0
+

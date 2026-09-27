@@ -1,0 +1,5 @@
+CONFIG_DEFAULT_DEVICE_TREE="zynqmp-ked-zcu-revA"
+CONFIG_BOOTDELAY=2
+# mkeficapsule (aggiornamenti capsule EFI) richiede gnutls sull'host e non
+# serve nel nostro flusso di boot (FSBL/bootgen + extlinux): disabilitato.
+# CONFIG_TOOLS_MKEFICAPSULE is not set
