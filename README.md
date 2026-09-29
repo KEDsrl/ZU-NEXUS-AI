@@ -48,6 +48,14 @@ vivado/                 block design TCL and constraints
 external.mk, Config.in, build.sh
 ```
 
+## Documentation
+
+* [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — detailed architecture: PL chain,
+  memory path and coherency, NPU branch over PCIe, software stack, application
+  design, boot flow, measured figures.
+* [docs/HOST-SETUP.md](docs/HOST-SETUP.md) — packages and tools to install on the
+  Linux build machine.
+
 ## Requirements
 
 * Linux host (tested on Ubuntu 22.04) with the usual Buildroot build packages:
