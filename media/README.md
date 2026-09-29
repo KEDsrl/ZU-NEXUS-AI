@@ -1,35 +1,37 @@
-# media/ — video di fallback di dxpose-qt
+# media/ — fallback video and panel logos
 
-Copiare qui `dron_720p.y4m`. Se presente, il pacchetto `dxpose-qt` lo installa in
+## dron_720p.y4m — fallback video
+
+Copy `dron_720p.y4m` here. When present, the `dxpose-qt` package installs it to
 
     /usr/share/dxpose-qt/media/dron_720p.y4m
 
-e l'app lo usa al posto della camera quando:
+and the application plays it instead of the camera when:
 
-- la catena video non viene rilevata o non si configura all'avvio;
-- la pipeline della camera va in errore (v4l2src, not-negotiated, STREAMON...);
-- la camera smette di produrre frame (4 s) o non ne produce entro 20 s dall'avvio.
+- the video chain is not detected, or cannot be configured at startup;
+- the camera pipeline fails (v4l2src, not-negotiated, STREAMON...);
+- the camera stops delivering frames (4 s) or delivers none within 20 s of start.
 
-Dal fallback si torna alla camera con il pulsante **Retry camera** nel pannello.
+The **Retry camera** button in the panel switches back to the camera.
 
-Il formato y4m non è compresso (720p30 ≈ 41 MB/s): tenere il video corto oppure
-aumentare `BR2_TARGET_ROOTFS_EXT2_SIZE` nel defconfig.
+y4m is uncompressed (about 41 MB/s at 720p30), so keep the clip short or raise
+`BR2_TARGET_ROOTFS_EXT2_SIZE` in the defconfig. The file is listed in
+`.gitignore`: distribute it outside the repository.
 
-Dopo aver sostituito il video:
+## logos/ — panel logos
+
+Every `.png` in `media/logos/` is installed to `/usr/share/dxpose-qt/logos/`
+(the target directory is wiped first, so removing a logo here removes it from the
+image as well). The application shows only the logos it finds, sorted
+alphabetically by file name, all at the same height and on a single row: 34 px
+when there is room, less depending on how many logos are present (about 30 px
+with four).
+
+After adding or removing files:
 
     ./build.sh dxpose-qt-rebuild && ./build.sh
 
-## logos/ — loghi del pannello
+Files can also be added or removed directly in `/usr/share/dxpose-qt/logos/` on
+the target, followed by `systemctl restart dxpose-qt`.
 
-Tutti i `.png` presenti in `media/logos/` vengono installati in
-`/usr/share/dxpose-qt/logos/` (la cartella nel rootfs viene prima svuotata).
-L'app mostra solo i loghi che trova, in ordine alfabetico del nome file,
-tutti alla stessa altezza e su una sola riga: 34 px se c'e' spazio, altrimenti
-l'altezza si riduce in base al numero di loghi (con 4 loghi: circa 30 px).
-Per aggiungerne o toglierne uno basta modificare questa cartella e poi:
-
-    ./build.sh dxpose-qt-rebuild && ./build.sh
-
-Sul target si possono anche cancellare/aggiungere file direttamente in
-`/usr/share/dxpose-qt/logos/` e riavviare l'app (`systemctl restart dxpose-qt`).
-Consigliati: sfondo trasparente, ritagliati sul contenuto, altezza >= 68 px.
+Recommended: transparent background, cropped to the content, at least 68 px tall.

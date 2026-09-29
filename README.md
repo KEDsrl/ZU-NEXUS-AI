@@ -1,188 +1,190 @@
-# ZU-NEXUS-AI — BSP Buildroot per IMX219 + DeepX DX-M1 su ZynqMP
+# ZU-NEXUS-AI — Buildroot BSP for IMX219 + DeepX DX-M1 on ZynqMP
 
-`BR2_EXTERNAL` per la board **KED ZU-NEXUS-AI** (Zynq UltraScale+). Contiene la
-catena video in PL per il sensore **IMX219**, l'integrazione dell'acceleratore
-**DeepX DX-M1** (PCIe M.2) e l'applicazione Qt6 **dxpose-qt** che mostra il video
-con l'inferenza e i controlli dell'ISP.
+`BR2_EXTERNAL` tree for the **KED ZU-NEXUS-AI** board (Zynq UltraScale+). It
+contains the IMX219 image processing chain implemented in PL, the integration of
+the **DeepX DX-M1** accelerator (PCIe M.2) and **dxpose-qt**, a Qt6 application
+that shows the live video with inference results, ISP controls and telemetry.
 
-## Architettura
+## Architecture
 
-Tre catene parallele che si incontrano solo nella DDR:
+Three parallel chains that meet only through system memory:
 
 ```
 PL (FPGA)   IMX219 → CSI-2 RX → Demosaic → CSC(WB) → Gamma → VPSS(scaler+CSC) → frmbuf WR
-                                                                                    │ AXI HPC0 (coerente)
-PS DDR      ═══════════════════ buffer CMA condivisi ═══════════════════════════════
+                                                                                    │ AXI HPC0 (coherent)
+PS DDR      ═══════════════════ shared CMA buffers ════════════════════════════════
               │ mmap
 A53 (SW)    v4l2src → [videoconvert] → dxpreprocess → dxinfer → dxpostprocess → dxosd → appsink (Qt)
                                                           │ PCIe DMA ↑
 PCIe                                                  DX-M1 NPU
 ```
 
-| Blocco | Indirizzo | Note |
+| Block | Address | Notes |
 |---|---|---|
-| `mipi_csi2_rx_subsyst_0` | 0x8002_0000 | 2 lane, RAW10 |
-| `v_demosaic_0` | 0x8003_0000 | uscita `RBG888_1X24` |
-| `v_frmbuf_wr_0` | 0x8004_0000 | master AXI su **S_AXI_HPC0_FPD** (coerente, CCI-400) |
+| `mipi_csi2_rx_subsyst_0` | 0x8002_0000 | 2 lanes, RAW10 |
+| `v_demosaic_0` | 0x8003_0000 | outputs `RBG888_1X24` |
+| `v_frmbuf_wr_0` | 0x8004_0000 | AXI master on **S_AXI_HPC0_FPD** (coherent, CCI-400) |
 | `v_gamma_lut_0` | 0x8008_0000 | |
-| `v_proc_ss_0` (`80100000.vpss`) | 0x8010_0000 | **Scaler-only** + CSC: resize a runtime |
+| `v_proc_ss_0` (`80100000.vpss`) | 0x8010_0000 | **Scaler-only** + CSC: runtime resize |
 | `v_proc_ss_2` (`80300000.csc`) | 0x8030_0000 | **CSC-only**: white balance, brightness, contrast |
 
-## Contenuto
+## Layout
 
 ```
-board/ked/zu-nexus/     device tree, overlay del rootfs, script di boot, post-build/image
+board/ked/zu-nexus/     device tree, rootfs overlay, boot scripts, post-build/image
   dts/linux/            zynqmp-ked-zcu-revA.dts + ...-pl.dtsi
-  rootfs-overlay/       service systemd, setup_pipeline.sh, test_pipeline.sh, weston.ini
+  rootfs-overlay/       systemd units, setup_pipeline.sh, test_pipeline.sh, weston.ini
 configs/                zu_nexus_ai_defconfig
 package/
-  dx-npu-driver/        driver PCIe del DX-M1
-  dx-rt/                runtime dx_rt + dxrt-cli
-  dx-fw/                firmware del modulo (/lib/firmware/deepx)
-  dx-stream/            plugin GStreamer DeepX (+ patch: latenza esposta da dxinfer)
-  librdkafka/           dipendenza di dx-stream (+ patch OPENSSL_NO_ENGINE)
-  ked-libyuv/           libyuv per dx-stream
-  dxpose-qt/            applicazione Qt6 (sorgenti in package/dxpose-qt/src)
-media/                  video di fallback e loghi del pannello
-vivado/                 TCL del block design e vincoli
+  dx-npu-driver/        DX-M1 PCIe driver
+  dx-rt/                dx_rt runtime + dxrt-cli
+  dx-fw/                module firmware (/lib/firmware/deepx)
+  dx-stream/            DeepX GStreamer plugins (+ patch: dxinfer exposes timings)
+  librdkafka/           dx-stream dependency (+ OPENSSL_NO_ENGINE patch)
+  ked-libyuv/           libyuv for dx-stream
+  dxpose-qt/            Qt6 application (sources in package/dxpose-qt/src)
+media/                  fallback video and panel logos
+vivado/                 block design TCL and constraints
 external.mk, Config.in, build.sh
 ```
 
-## Prerequisiti
+## Requirements
 
-* Host Linux (testato su Ubuntu 22.04) con i pacchetti di build di Buildroot:
+* Linux host (tested on Ubuntu 22.04) with the usual Buildroot build packages:
   `sudo apt install build-essential git bc bison flex libssl-dev cpio unzip rsync file wget python3`
-* **Vivado 2023.2** (solo per rigenerare il bitstream)
-* Circa 40 GB di spazio libero
-* I modelli `.dxnn` da `sdk.deepx.ai`, da copiare in `/home/ked/models` sul target
-* Facoltativo: `media/dron_720p.y4m`, video di fallback (non versionato: è grande)
+* **Vivado 2023.2**, only needed to regenerate the bitstream
+* About 40 GB of free disk space
+* The `.dxnn` models from `sdk.deepx.ai`, to be copied to `/home/ked/models` on the target
+* Optional: `media/dron_720p.y4m`, the fallback video (not tracked in git: it is large)
 
-## Compilazione
+## Building
 
 ```bash
-git clone <questo-repo> ked-external
+git clone <this-repo> ked-external
 cd ked-external
-./build.sh                 # scarica Buildroot se assente, applica il defconfig e compila
+./build.sh                 # fetches Buildroot if missing, applies the defconfig and builds
 ```
 
-Il risultato è `../buildroot/output/images/sdcard.img`.
+The result is `../buildroot/output/images/sdcard.img`.
 
-### Comandi utili
+### Useful commands
 
 ```bash
-./build.sh defconfig              # riapplica il defconfig (SEMPRE dopo averlo modificato)
-./build.sh menuconfig             # configurazione interattiva
-./build.sh linux-reconfigure      # dopo una modifica a linux.fragment
-./build.sh dxpose-qt-rebuild      # ricompila solo l'app Qt
-./build.sh dx-stream-dirclean     # forza la riapplicazione delle patch di dx-stream
-./build.sh bootbin                # rigenera BOOT.BIN
-./build.sh vivado synth           # sintesi FPGA + export XSA
-./build.sh xsa <file.xsa>         # rigenera fsbl/pmufw ed estrae il .bit
+./build.sh defconfig              # re-apply the defconfig (ALWAYS after editing it)
+./build.sh menuconfig             # interactive configuration
+./build.sh linux-reconfigure      # after editing linux.fragment
+./build.sh dxpose-qt-rebuild      # rebuild only the Qt application
+./build.sh dx-stream-dirclean     # force dx-stream patches to be re-applied
+./build.sh bootbin                # regenerate BOOT.BIN
+./build.sh vivado synth           # FPGA synthesis + XSA export
+./build.sh xsa <file.xsa>         # regenerate fsbl/pmufw and extract the .bit
 ```
 
-> **Attenzione:** `./build.sh <target>` **non** riapplica il defconfig. Dopo aver
-> modificato `configs/zu_nexus_ai_defconfig` eseguire prima `./build.sh defconfig`.
+> **Note:** `./build.sh <target>` does **not** re-apply the defconfig. After
+> editing `configs/zu_nexus_ai_defconfig`, run `./build.sh defconfig` first.
 
-### Scrittura della SD
+### Writing the SD card
 
 ```bash
-lsblk                                   # individuare il device (es. /dev/sdb)
+lsblk                                   # identify the device (e.g. /dev/sdb)
 sudo dd if=../buildroot/output/images/sdcard.img of=/dev/sdX bs=4M conv=fsync status=progress
 sync
 ```
 
-Due partizioni: FAT32 di boot (`BOOT.BIN`, `Image`, `system.dtb`, `extlinux/`) ed
-ext4 di rootfs.
+Two partitions: a FAT32 boot partition (`BOOT.BIN`, `Image`, `system.dtb`,
+`extlinux/`) and an ext4 rootfs.
 
-## Primo avvio
+## First boot
 
-All'accensione partono `weston.service` e `dxpose-qt.service` (utente `ked`,
-uid 1001). L'app configura da sola la catena video, carica il modello sul DX-M1 e
-mostra video, sinottico della pipeline e pannello dei controlli.
+`weston.service` and `dxpose-qt.service` start automatically (user `ked`,
+uid 1001). The application configures the video chain itself, loads the model on
+the DX-M1 and shows the video, the pipeline synoptic and the control panel.
 
-Verifiche rapide:
+Quick checks:
 
 ```bash
-ls /sys/firmware/devicetree/base/amba_pl@0/vcap-imx219/dma-coherent   # deve esistere
-grep -i ina /sys/class/hwmon/hwmon*/name                              # due "ina231"
-dxrt-cli -s                                                           # stato del DX-M1
+ls /sys/firmware/devicetree/base/amba_pl@0/vcap-imx219/dma-coherent   # must exist
+grep -i ina /sys/class/hwmon/hwmon*/name                              # two "ina231"
+dxrt-cli -s                                                           # DX-M1 status
 systemctl status dxpose-qt
-test_pipeline.sh npu-check                                            # inventario completo
+test_pipeline.sh npu-check                                            # full inventory
 ```
 
-## Note importanti
+## Things worth knowing
 
-### `dma-coherent` (prestazioni)
+### `dma-coherent` (performance)
 
-Il `frmbuf` è cablato su `S_AXI_HPC0_FPD`, porta coerente via CCI-400. Il device
-tree dichiara `dma-coherent` sul nodo **`vcap-imx219`** (è quello che alloca i
-buffer: `xilinx-dma.c` fa `dma->queue.dev = dma->xdev->dev`). Senza quella riga i
-buffer sono *uncached* e la CPU li legge a ~4 MB/s: misurato **3,5 fps** contro
-**29 fps** sullo stesso test.
+The frame buffer writer is wired to `S_AXI_HPC0_FPD`, the coherent port through
+CCI-400. The device tree declares `dma-coherent` on the **`vcap-imx219`** node,
+because that is the device vb2 allocates from (`xilinx-dma.c` does
+`dma->queue.dev = dma->xdev->dev`). Without it the buffers are *uncached* and the
+CPU reads them at roughly 4 MB/s: the same test measured **3.5 fps** against
+**29 fps** once the property was in place.
 
-### Nomi dei formati invertiti
+### Format names are swapped
 
-In `drivers/dma/xilinx/xilinx_frmbuf.c` i nomi del device tree sono invertiti
-rispetto ai fourcc V4L2:
+In `drivers/dma/xilinx/xilinx_frmbuf.c` the device tree names are swapped with
+respect to the V4L2 fourcc they expose:
 
-| nome DTS | `CONFIG.HAS_*` nel TCL | fourcc V4L2 |
+| DTS name | `CONFIG.HAS_*` in the TCL | V4L2 fourcc |
 |---|---|---|
 | `bgr888` | `HAS_RGB8` | **RGB3** |
 | `rgb888` | `HAS_BGR8` | **BGR3** |
 
-Il driver **non** verifica il bitstream: un formato dichiarato ma non
-implementato viene enumerato lo stesso e produce dati non validi, senza errori.
-**`.bit` e `.dtb` vanno sempre aggiornati insieme.**
+The driver does **not** validate against the bitstream: a format that is
+declared but not implemented in hardware is still enumerated and produces
+invalid data with no error at all. **Always update the `.bit` and the `.dtb`
+together.**
 
-Con un bitstream che ha `HAS_RGB8` si può catturare in RGB3 ed eliminare
-l'ultima conversione software:
+With a bitstream that has `HAS_RGB8`, capture can be done in RGB3 and the last
+software conversion disappears:
 
 ```bash
 echo 'DXPOSE_ARGS="--rgb"' > /etc/default/dxpose-qt
 systemctl restart dxpose-qt
 ```
 
-### Firmware del DX-M1
+### DX-M1 firmware
 
-dx_rt 3.3.2 richiede firmware ≥ 2.5.2. All'avvio l'app confronta il firmware del
-modulo con quello incluso in `/lib/firmware/deepx` e, se è più vecchio, lo
-aggiorna da sola mostrando un avviso a schermo. Il nuovo firmware diventa attivo
-solo dopo un **power cycle completo** (un reboot non basta). L'aggiornamento
-automatico si disattiva con `--no-fw-update`.
+dx_rt 3.3.2 requires firmware 2.5.2 or newer. At startup the application
+compares the module firmware with the one bundled in `/lib/firmware/deepx` and,
+if the module is older, updates it automatically while showing a notice on
+screen. The new firmware only becomes active after a **full power cycle**; a
+reboot is not enough. Automatic updates can be disabled with `--no-fw-update`.
 
-### Fallback su file
+### File fallback
 
-Se la camera non viene rilevata, o la sua pipeline va in errore, l'app passa a
-`/usr/share/dxpose-qt/media/dron_720p.y4m` (installato da `media/dron_720p.y4m`,
-se presente). Serve il plugin `y4m` di gst-plugins-bad, già nel defconfig. Dal
-fallback si torna alla camera con il pulsante **Retry camera**.
+If the camera is not detected, or its pipeline fails, the application switches to
+`/usr/share/dxpose-qt/media/dron_720p.y4m` (installed from `media/dron_720p.y4m`
+when present). This needs the `y4m` plugin from gst-plugins-bad, already enabled
+in the defconfig. The **Retry camera** button switches back to the camera.
 
-## Script sul target
+## Target scripts
 
 ```bash
-setup_pipeline.sh display|npu     # configura la catena media e i controlli ISP
-tune_isp.sh                       # regolazione interattiva di WB/gamma/brightness/contrast
-test_pipeline.sh <step>           # 1..12: topologia, cattura, fps, kms, wayland, NPU...
+setup_pipeline.sh display|npu     # configure the media chain and the ISP controls
+tune_isp.sh                       # interactive WB/gamma/brightness/contrast tuning
+test_pipeline.sh <step>           # 1..12: topology, capture, fps, kms, wayland, NPU...
 ```
 
-## Applicazione dxpose-qt
+## dxpose-qt application
 
-Opzioni principali (vedi `dxpose-qt --help`):
+Main options (see `dxpose-qt --help`):
 
-| opzione | default | descrizione |
+| option | default | description |
 |---|---|---|
-| `--width/--height` | 1280×720 | risoluzione di cattura (resize nel VPSS) |
-| `--rgb` | off | cattura RGB3 (richiede `HAS_RGB8`) |
-| `--model` | `YoloV5S_PPU` | modello iniziale |
-| `--no-awb` | off | avvio senza auto white balance |
-| `--no-fw-update` | off | niente aggiornamento firmware automatico |
-| `--logos-dir` | `/usr/share/dxpose-qt/logos` | loghi del pannello |
-| `--windowed` | off | finestra invece che schermo intero |
+| `--width/--height` | 1280×720 | capture resolution (resize done by the VPSS) |
+| `--rgb` | off | capture RGB3 (requires `HAS_RGB8`) |
+| `--model` | `YoloV5S_PPU` | initial model |
+| `--no-awb` | off | start with auto white balance disabled |
+| `--no-fw-update` | off | no automatic firmware update |
+| `--logos-dir` | `/usr/share/dxpose-qt/logos` | panel logos |
+| `--windowed` | off | windowed instead of fullscreen |
 
-Le opzioni a regime si impostano in `/etc/default/dxpose-qt`.
+Permanent options go into `/etc/default/dxpose-qt`.
 
-## Licenza
+## License
 
-I pacchetti DeepX (`dx-rt`, `dx-stream`, `dx-fw`, `dx-npu-driver`) sono soggetti
-alle licenze proprietarie DeepX. Il resto del BSP è distribuito come indicato nel
-repository.
+The DeepX packages (`dx-rt`, `dx-stream`, `dx-fw`, `dx-npu-driver`) are covered
+by DeepX proprietary licenses. The rest of the BSP is distributed as stated in
+the repository.
